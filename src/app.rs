@@ -9,6 +9,7 @@ use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
+use unicode_width::UnicodeWidthStr;
 
 use crate::cli::{Invocation, Mode};
 use crate::config::resolve_config_dir;
@@ -612,13 +613,13 @@ fn render_header(
     styles: &ThemeStyles,
 ) {
     let content = content_rect(area, layout.pad_x);
-    let escape = truncate_chars("esc", content.width as usize);
-    let available = content.width.saturating_sub(escape.chars().count() as u16) as usize;
-    let title = truncate_chars(title, available);
+    let escape = truncate_width("esc", content.width as usize);
+    let available = content.width.saturating_sub(width_as_u16(&escape)) as usize;
+    let title = truncate_width(title, available);
     let gap = content
         .width
-        .saturating_sub(title.chars().count() as u16)
-        .saturating_sub(escape.chars().count() as u16) as usize;
+        .saturating_sub(width_as_u16(&title))
+        .saturating_sub(width_as_u16(&escape)) as usize;
     let line = Line::from(vec![
         Span::styled(title, styles.header),
         Span::styled(" ".repeat(gap), styles.panel),
@@ -635,7 +636,7 @@ fn render_search(frame: &mut Frame<'_>, area: Rect, app: &App, styles: &ThemeSty
     let text_width = content_area.width.saturating_sub(2) as usize;
     let (visible, cursor_offset) = search_window(&app.filter, app.filter_cursor, text_width);
     let content = if app.filter.is_empty() {
-        Span::styled(truncate_chars("Search", text_width), styles.muted)
+        Span::styled(truncate_width("Search", text_width), styles.muted)
     } else {
         Span::styled(visible, styles.panel)
     };
@@ -661,11 +662,30 @@ fn search_window(value: &str, cursor: usize, width: usize) -> (String, usize) {
     if width == 0 {
         return (String::new(), 0);
     }
-    let characters = value.chars().collect::<Vec<_>>();
-    let cursor = cursor.min(characters.len());
-    let start = cursor.saturating_sub(width.saturating_sub(1));
-    let end = (start + width).min(characters.len());
-    (characters[start..end].iter().collect(), cursor - start)
+
+    let mut boundaries = value
+        .char_indices()
+        .map(|(byte_index, _)| byte_index)
+        .collect::<Vec<_>>();
+    boundaries.push(value.len());
+    let cursor = cursor.min(boundaries.len().saturating_sub(1));
+    let cursor_byte = boundaries[cursor];
+    let cursor_budget = width.saturating_sub(1);
+    let start_byte = boundaries
+        .iter()
+        .copied()
+        .take(cursor.saturating_add(1))
+        .find(|start| display_width(&value[*start..cursor_byte]) <= cursor_budget)
+        .unwrap_or(cursor_byte);
+    let mut end_byte = cursor_byte;
+    for candidate in boundaries.iter().copied().skip(cursor) {
+        if display_width(&value[start_byte..candidate]) <= width {
+            end_byte = candidate;
+        }
+    }
+    let cursor_offset = display_width(&value[start_byte..cursor_byte]);
+
+    (value[start_byte..end_byte].to_owned(), cursor_offset)
 }
 
 fn render_list(frame: &mut Frame<'_>, area: Rect, app: &mut App, styles: &ThemeStyles) {
@@ -679,7 +699,7 @@ fn render_list(frame: &mut Frame<'_>, area: Rect, app: &mut App, styles: &ThemeS
     if rows.is_empty() {
         let content = content_rect(area, app.layout.pad_x);
         frame.render_widget(
-            Paragraph::new(truncate_chars(
+            Paragraph::new(truncate_width(
                 &app.palette.empty_text,
                 content.width as usize,
             ))
@@ -771,8 +791,8 @@ fn render_item(
     frame.render_widget(Paragraph::new(Line::from(spans)).style(style), content);
 
     if let Some(shortcut) = item.shortcut.as_deref() {
-        let shortcut = truncate_chars(shortcut, content.width.saturating_sub(1) as usize);
-        let shortcut_width = u16::try_from(shortcut.chars().count().saturating_add(1))
+        let shortcut = truncate_width(shortcut, content.width.saturating_sub(1) as usize);
+        let shortcut_width = u16::try_from(display_width(&shortcut).saturating_add(1))
             .unwrap_or(u16::MAX)
             .min(content.width);
         let shortcut_area = Rect::new(
@@ -817,7 +837,7 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App, styles: &ThemeSty
     };
     let content = content_rect(area, app.layout.pad_x);
     frame.render_widget(
-        Paragraph::new(truncate_chars(&text, content.width as usize))
+        Paragraph::new(truncate_width(&text, content.width as usize))
             .style(style)
             .alignment(Alignment::Left),
         content,
@@ -828,8 +848,23 @@ fn first_selectable(items: &[Item]) -> Option<usize> {
     items.iter().position(|item| item.selectable)
 }
 
-fn truncate_chars(value: &str, width: usize) -> String {
-    value.chars().take(width).collect()
+fn display_width(value: &str) -> usize {
+    UnicodeWidthStr::width(value)
+}
+
+fn width_as_u16(value: &str) -> u16 {
+    u16::try_from(display_width(value)).unwrap_or(u16::MAX)
+}
+
+fn truncate_width(value: &str, max_width: usize) -> String {
+    let mut end = 0;
+    for (start, character) in value.char_indices() {
+        let candidate = start.saturating_add(character.len_utf8());
+        if display_width(&value[..candidate]) <= max_width {
+            end = candidate;
+        }
+    }
+    value[..end].to_owned()
 }
 
 fn display_palette_name(name: &str) -> String {
@@ -1147,6 +1182,52 @@ mod tests {
         assert_eq!(search_window("abcdefgh", 8, 4), ("fgh".to_owned(), 3));
         assert_eq!(search_window("éclair", 2, 4), ("écla".to_owned(), 2));
         assert_eq!(search_window("anything", 4, 0), (String::new(), 0));
+    }
+
+    #[test]
+    fn width_helpers_handle_wide_combining_and_joined_text() {
+        let family = "👨‍👩‍👧‍👦";
+
+        assert_eq!(display_width("界"), 2);
+        assert_eq!(display_width("e\u{301}"), 1);
+        assert_eq!(display_width(family), 2);
+        assert_eq!(truncate_width("a界b", 2), "a");
+        assert_eq!(truncate_width("a界b", 3), "a界");
+        assert_eq!(truncate_width("e\u{301}x", 1), "e\u{301}");
+        assert_eq!(truncate_width(family, 2), family);
+        assert_eq!(truncate_width("界", 1), "");
+    }
+
+    #[test]
+    fn search_window_uses_terminal_cells_for_content_and_cursor() {
+        assert_eq!(search_window("界abc", 1, 4), ("界ab".to_owned(), 2));
+        assert_eq!(search_window("a界bc", 4, 4), ("bc".to_owned(), 2));
+        assert_eq!(
+            search_window("e\u{301}abc", 2, 3),
+            ("e\u{301}ab".to_owned(), 1)
+        );
+    }
+
+    #[test]
+    fn rendering_positions_wide_header_shortcut_and_search_cursor_by_cells() {
+        let mut terminal = Terminal::new(TestBackend::new(16, 10)).unwrap();
+        let mut item = test_item("界a Run");
+        item.shortcut = Some("界".to_owned());
+        let mut palette = test_palette(vec![item]);
+        palette.title = "界面".to_owned();
+        palette.grouped = false;
+        let mut app = App::new(palette, None);
+        app.insert_text("界a");
+
+        terminal.draw(|frame| render(frame, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        assert_eq!(buffer[(10, 1)].symbol(), "e");
+        assert_eq!(buffer[(11, 1)].symbol(), "s");
+        assert_eq!(buffer[(12, 1)].symbol(), "c");
+        assert_eq!(buffer[(11, 4)].symbol(), "界");
+        assert_eq!(buffer[(8, 2)].symbol(), " ");
+        terminal.backend_mut().assert_cursor_position((8, 2));
     }
 
     #[test]
