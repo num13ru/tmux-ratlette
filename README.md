@@ -3,6 +3,13 @@
 A command palette for tmux. It runs on [Bun](https://bun.sh), has no runtime
 dependencies, and opens quickly enough to use as a regular tmux binding.
 
+> [!NOTE]
+> A native Rust port is in progress. The existing Bun implementation remains
+> the default while behavior is ported and verified. Contributors can build the
+> experimental bootstrap with `cargo build` and run it as
+> `target/debug/tmux-ratlette`; it currently provides CLI parsing, popup
+> measurement defaults, terminal setup, and a placeholder TUI only.
+
 Type a few letters, pick a command, hit enter: split a pane, jump to a window,
 detach a session, open a popup tool, or switch to a custom palette. User config
 lives in `~/.config/tmux-palette/*.json`, so local changes survive repo updates.

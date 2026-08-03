@@ -1,0 +1,25 @@
+[package]
+name = "tmux-ratlette"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Native command palette for tmux"
+license = "MIT"
+repository = "https://github.com/num13ru/tmux-ratlette"
+keywords = ["tmux", "terminal", "tui", "productivity"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+crossterm = "0.29"
+dirs = "6"
+ratatui = "0.29"
+thiserror = "2"
+
+[lib]
+name = "tmux_ratlette"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tmux-ratlette"
+path = "src/main.rs"
