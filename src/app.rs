@@ -5,16 +5,16 @@ use std::path::PathBuf;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Block, Paragraph};
 
 use crate::cli::{Invocation, Mode};
 use crate::config::resolve_config_dir;
 use crate::dispatch;
-use crate::model::{Action, Item, Palette};
+use crate::model::{Action, Item, Palette, Theme, ThemeColor};
 use crate::terminal::TerminalSession;
-use crate::{Result, palettes};
+use crate::{Result, palettes, themes};
 
 const DEFAULT_WIDTH: u16 = 90;
 const DEFAULT_MAX_HEIGHT: u16 = 28;
@@ -24,15 +24,45 @@ const DEFAULT_MOBILE_WIDTH: u16 = 80;
 const CHROME_ROWS: u16 = 2;
 const PAGE_SIZE: isize = 10;
 
-const HEADER_STYLE: Style = Style::new().fg(Color::White).add_modifier(Modifier::BOLD);
-const CATEGORY_STYLE: Style = Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD);
-const ITEM_STYLE: Style = Style::new().fg(Color::Gray);
-const SELECTED_STYLE: Style = Style::new()
-    .fg(Color::White)
-    .bg(Color::Rgb(61, 61, 75))
-    .add_modifier(Modifier::BOLD);
-const MUTED_STYLE: Style = Style::new().fg(Color::DarkGray);
-const STATUS_STYLE: Style = Style::new().fg(Color::Yellow);
+#[derive(Debug, Clone, Copy)]
+struct ThemeStyles {
+    panel: Style,
+    header: Style,
+    category: Style,
+    item: Style,
+    selected: Style,
+    accent: Style,
+    selected_accent: Style,
+    muted: Style,
+    selected_muted: Style,
+    status: Style,
+}
+
+impl ThemeStyles {
+    fn new(theme: Theme) -> Self {
+        let selected_fg = theme.selected_fg.unwrap_or(theme.fg);
+        let selected_accent = theme.selected_fg.unwrap_or(theme.accent);
+        Self {
+            panel: themed_style(theme.fg, theme.panel),
+            header: themed_style(theme.title_fg.unwrap_or(theme.fg), theme.panel)
+                .add_modifier(Modifier::BOLD),
+            category: themed_style(theme.accent, theme.panel).add_modifier(Modifier::BOLD),
+            item: themed_style(theme.muted, theme.panel),
+            selected: themed_style(selected_fg, theme.selected).add_modifier(Modifier::BOLD),
+            accent: themed_style(theme.accent, theme.panel),
+            selected_accent: themed_style(selected_accent, theme.selected),
+            muted: themed_style(theme.muted, theme.panel),
+            selected_muted: themed_style(theme.muted, theme.selected),
+            status: themed_style(theme.accent, theme.panel),
+        }
+    }
+}
+
+fn themed_style(foreground: ThemeColor, background: ThemeColor) -> Style {
+    Style::new()
+        .fg(foreground.ratatui())
+        .bg(background.ratatui())
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Measurement {
@@ -40,8 +70,8 @@ pub struct Measurement {
     pub width: u16,
     pub pad_x: u16,
     pub border: &'static str,
-    pub body_style: &'static str,
-    pub border_style: &'static str,
+    pub body_style: String,
+    pub border_style: String,
 }
 
 impl std::fmt::Display for Measurement {
@@ -85,16 +115,10 @@ impl App {
 
     fn unsupported(name: &str, dispatch_path: Option<PathBuf>) -> Self {
         let title = display_palette_name(name);
-        let mut app = Self::new(
-            Palette {
-                name: name.to_owned(),
-                title: title.clone(),
-                grouped: false,
-                empty_text: format!("The {title} palette has not been ported to Rust yet"),
-                items: Vec::new(),
-            },
-            dispatch_path,
-        );
+        let mut palette = Palette::new(name, &title, Vec::new());
+        palette.grouped = false;
+        palette.empty_text = format!("The {title} palette has not been ported to Rust yet");
+        let mut app = Self::new(palette, dispatch_path);
         app.status = Some("Esc closes this placeholder".to_owned());
         app
     }
@@ -273,21 +297,21 @@ fn measure_palette(
     client_width: Option<NonZeroU16>,
     client_height: Option<NonZeroU16>,
 ) -> Measurement {
-    let rows = palettes::load(palette_name)
+    let (rows, theme) = palettes::load(palette_name)
         .map(|mut palette| {
             if let Some(category) = category {
                 palette.filter_category(category);
             }
-            desired_height(&palette)
+            (desired_height(&palette), palette.theme)
         })
-        .unwrap_or(DEFAULT_EMPTY_HEIGHT);
+        .unwrap_or((DEFAULT_EMPTY_HEIGHT, themes::default_theme()));
     let mut measurement = Measurement {
         rows,
         width: DEFAULT_WIDTH,
         pad_x: DEFAULT_PAD_X,
         border: "none",
-        body_style: "default",
-        border_style: "default",
+        body_style: theme.tmux_body_style(),
+        border_style: theme.tmux_border_style(),
     };
 
     if let Some(width) = client_width.map(NonZeroU16::get)
@@ -351,23 +375,25 @@ fn render(frame: &mut Frame<'_>, app: &mut App) {
     if area.is_empty() {
         return;
     }
+    let styles = ThemeStyles::new(app.palette.theme);
+    frame.render_widget(Block::default().style(styles.panel), area);
 
     let header = Rect::new(area.x, area.y, area.width, 1);
-    render_header(frame, header, &app.palette.title);
+    render_header(frame, header, &app.palette.title, &styles);
 
     let footer_height = u16::from(area.height >= 2);
     let list_y = area.y.saturating_add(1);
     let list_height = area.height.saturating_sub(1 + footer_height);
     let list = Rect::new(area.x, list_y, area.width, list_height);
-    render_list(frame, list, app);
+    render_list(frame, list, app, &styles);
 
     if footer_height == 1 {
         let footer = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
-        render_footer(frame, footer, app);
+        render_footer(frame, footer, app, &styles);
     }
 }
 
-fn render_header(frame: &mut Frame<'_>, area: Rect, title: &str) {
+fn render_header(frame: &mut Frame<'_>, area: Rect, title: &str, styles: &ThemeStyles) {
     let escape = "esc";
     let available = area.width.saturating_sub(escape.len() as u16) as usize;
     let title = truncate_chars(title, available);
@@ -376,14 +402,14 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, title: &str) {
         .saturating_sub(title.chars().count() as u16)
         .saturating_sub(escape.len() as u16) as usize;
     let line = Line::from(vec![
-        Span::styled(title, HEADER_STYLE),
-        Span::raw(" ".repeat(gap)),
-        Span::styled(escape, MUTED_STYLE),
+        Span::styled(title, styles.header),
+        Span::styled(" ".repeat(gap), styles.panel),
+        Span::styled(escape, styles.muted),
     ]);
-    frame.render_widget(Paragraph::new(line), area);
+    frame.render_widget(Paragraph::new(line).style(styles.panel), area);
 }
 
-fn render_list(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
+fn render_list(frame: &mut Frame<'_>, area: Rect, app: &mut App, styles: &ThemeStyles) {
     if area.is_empty() {
         app.scroll = 0;
         return;
@@ -394,7 +420,7 @@ fn render_list(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
     if rows.is_empty() {
         frame.render_widget(
             Paragraph::new(truncate_chars(&app.palette.empty_text, area.width as usize))
-                .style(MUTED_STYLE),
+                .style(styles.muted),
             area,
         );
         return;
@@ -415,9 +441,10 @@ fn render_list(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
         match row {
             Row::Category(category) => frame.render_widget(
                 Paragraph::new(Line::from(vec![
-                    Span::raw("  "),
-                    Span::styled(category.as_str(), CATEGORY_STYLE),
-                ])),
+                    Span::styled("  ", styles.panel),
+                    Span::styled(category.as_str(), styles.category),
+                ]))
+                .style(styles.panel),
                 row_area,
             ),
             Row::Item(index) => render_item(
@@ -425,38 +452,54 @@ fn render_list(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
                 row_area,
                 &app.palette.items[*index],
                 app.selected == Some(*index),
+                styles,
             ),
         }
     }
 }
 
-fn render_item(frame: &mut Frame<'_>, area: Rect, item: &Item, selected: bool) {
-    let style = if selected { SELECTED_STYLE } else { ITEM_STYLE };
+fn render_item(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    item: &Item,
+    selected: bool,
+    styles: &ThemeStyles,
+) {
+    let style = if selected {
+        styles.selected
+    } else {
+        styles.item
+    };
+    let accent = if selected {
+        styles.selected_accent
+    } else {
+        styles.accent
+    };
     let marker = if selected { "▌" } else { " " };
     let icon = item.icon.as_deref().unwrap_or(" ");
     let mut spans = vec![
-        Span::styled(marker, if selected { CATEGORY_STYLE } else { style }),
-        Span::raw(" "),
-        Span::styled(
-            icon,
-            if selected {
-                SELECTED_STYLE
-            } else {
-                CATEGORY_STYLE
-            },
-        ),
-        Span::raw("  "),
+        Span::styled(marker, accent),
+        Span::styled(" ", style),
+        Span::styled(icon, accent),
+        Span::styled("  ", style),
         Span::styled(item.title.as_str(), style),
     ];
     if let Some(description) = item.description.as_deref() {
-        spans.push(Span::styled(format!(" - {description}"), MUTED_STYLE));
+        spans.push(Span::styled(
+            format!(" - {description}"),
+            if selected {
+                styles.selected_muted
+            } else {
+                styles.muted
+            },
+        ));
     }
     frame.render_widget(Paragraph::new(Line::from(spans)).style(style), area);
 }
 
-fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
+fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App, styles: &ThemeStyles) {
     let (text, style) = match app.status.as_deref() {
-        Some(status) => (status.to_owned(), STATUS_STYLE),
+        Some(status) => (status.to_owned(), styles.status),
         None => {
             let count = app
                 .palette
@@ -467,7 +510,7 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
             let noun = if count == 1 { "command" } else { "commands" };
             (
                 format!("enter select   up/down move   {count} {noun}"),
-                MUTED_STYLE,
+                styles.muted,
             )
         }
     };
@@ -546,7 +589,10 @@ mod tests {
     fn default_measurement_fits_the_commands_palette_cap() {
         let result = measure(None, None);
 
-        assert_eq!(result.to_string(), "28\t90\t3\tnone\tdefault\tdefault");
+        assert_eq!(
+            result.to_string(),
+            "28\t90\t3\tnone\tbg=#2d2b55\tfg=#fad000,bg=default"
+        );
     }
 
     #[test]
@@ -670,6 +716,25 @@ mod tests {
         assert!(text.contains("First"));
         assert!(text.contains("Second"));
         assert!(text.contains("2 commands"));
+    }
+
+    #[test]
+    fn rendering_applies_the_default_bundled_theme() {
+        let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+        let mut app = App::new(
+            test_palette(vec![test_item("First").category("Group")]),
+            None,
+        );
+
+        terminal.draw(|frame| render(frame, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        assert_eq!(buffer[(0, 0)].bg, ratatui::style::Color::Rgb(45, 43, 85));
+        assert_eq!(buffer[(0, 0)].fg, ratatui::style::Color::Rgb(255, 255, 255));
+        assert_eq!(buffer[(2, 1)].fg, ratatui::style::Color::Rgb(250, 208, 0));
+        assert_eq!(buffer[(0, 2)].bg, ratatui::style::Color::Rgb(80, 77, 122));
+        assert_eq!(buffer[(0, 2)].fg, ratatui::style::Color::Rgb(250, 208, 0));
+        assert_eq!(buffer[(5, 2)].fg, ratatui::style::Color::Rgb(255, 255, 255));
     }
 
     #[test]

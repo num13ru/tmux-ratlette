@@ -1408,7 +1408,7 @@ the source of truth for architecture and acceptance criteria.
       unavailable actions without panicking or failing silently.
 - [x] Size the static palette from its item/category count and respect
       `--category` during measurement and rendering.
-- [ ] Add a reusable theme model and apply the default bundled theme instead of
+- [x] Add a reusable theme model and apply the default bundled theme instead of
       fixed Ratatui styles.
 
 Phase 2's functional exit condition is met: the main Commands palette is usable

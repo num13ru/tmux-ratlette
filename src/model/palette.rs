@@ -1,4 +1,4 @@
-use super::Item;
+use super::{Item, Theme};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Palette {
@@ -6,6 +6,7 @@ pub struct Palette {
     pub title: String,
     pub grouped: bool,
     pub empty_text: String,
+    pub theme: Theme,
     pub items: Vec<Item>,
 }
 
@@ -16,6 +17,7 @@ impl Palette {
             title: title.into(),
             grouped: true,
             empty_text: "No commands".to_owned(),
+            theme: crate::themes::default_theme(),
             items,
         }
     }

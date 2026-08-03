@@ -6,5 +6,6 @@ pub mod error;
 pub mod model;
 pub mod palettes;
 pub mod terminal;
+pub mod themes;
 
 pub use error::{Error, Result};
