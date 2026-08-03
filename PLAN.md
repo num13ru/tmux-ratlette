@@ -1378,3 +1378,89 @@ Possibly direct tmux popup management from Rust
 💡 Consider removing the shell wrapper only after crates.io beta. Direct popup control from Rust is attractive, but keeping Bash initially lowers migration risk.
 
 💡 Keep the original repository’s MIT license and attribution unless the upstream license or fork requirements indicate otherwise.
+
+---
+
+## 27. Rust Port Progress
+
+Last reviewed: 2026-08-04.
+
+Check an item only after its automated tests pass. Check phase-level acceptance
+items only after the relevant behavior has also been exercised in a real tmux
+popup. This section records implementation status; the earlier sections remain
+the source of truth for architecture and acceptance criteria.
+
+### Foundation and static Commands palette
+
+- [x] Create the single-package Rust bootstrap.
+- [x] Implement CLI parsing and legacy-compatible measurement flags.
+- [x] Resolve the compatible configuration directory.
+- [x] Set up and restore the terminal on normal exit, setup failure, and panic.
+- [x] Launch the Rust binary from the development wrapper and TPM entry point.
+- [x] Preserve `TMUX_PALETTE_BIN` and `@palette-binary` overrides.
+- [x] Add Rust `Action`, `Item`, and `Palette` domain models.
+- [x] Port all 31 compiled-in Commands palette items.
+- [x] Render grouped category and item rows with a highlighted selection.
+- [x] Support Up/Down, Ctrl-P/Ctrl-N, PageUp/PageDown, Home, and End.
+- [x] Keep selection visible while scrolling and resizing.
+- [x] Dispatch tmux commands through the wrapper command-file protocol.
+- [x] Handle empty palettes, tiny terminals, missing dispatch files, and
+      unavailable actions without panicking or failing silently.
+- [x] Size the static palette from its item/category count and respect
+      `--category` during measurement and rendering.
+- [ ] Add a reusable theme model and apply the default bundled theme instead of
+      fixed Ratatui styles.
+
+Phase 2's functional exit condition is met: the main Commands palette is usable
+without search or custom configuration. Theme parity remains open and is tracked
+with the rendering work below.
+
+### Next: search and rendering parity
+
+- [ ] Port the TypeScript fuzzy matcher with shared parity fixtures. **Next.**
+- [ ] Add filter text, cursor position, and selection state to the Rust app.
+- [ ] Handle character insertion, Backspace, Delete, Left/Right, and word-wise
+      cursor movement without corrupting UTF-8 input.
+- [ ] Re-rank visible items as the query changes and reset invalid selections.
+- [ ] Preserve initials/auto-alias and multi-word matching behavior.
+- [ ] Add the search row and place the real terminal cursor correctly.
+- [ ] Match header, footer, spacing, descriptions, shortcuts, and empty states.
+- [ ] Add terminal-cell-aware Unicode truncation and padding.
+- [ ] Add mouse click and wheel behavior, including off-screen rows.
+- [ ] Complete narrow-terminal and bordered-popup layout parity.
+- [ ] Compare Rust and TypeScript screenshots at representative popup sizes.
+
+Search works when the same query produces the same ordered items as TypeScript,
+editing remains correct for Unicode text and boundary keys, selection stays
+visible after filtering/resizing, and the popup remains usable with zero results.
+
+### Remaining port phases
+
+- [ ] Port `find-pane` and its initial current-pane selection.
+- [ ] Port `move-pane`.
+- [ ] Port bundled and user themes with live preview and atomic persistence.
+- [ ] Add the nested palette navigation stack and Escape/back behavior.
+- [ ] Load `commands.json`, `hidden.json`, `aliases.json`, and `shortcuts.json`.
+- [ ] Load navigation, sizing, theme, and custom palette configuration.
+- [ ] Tolerate unknown optional fields and report malformed files with paths.
+- [ ] Execute shell-generated palette sources with timeout and output limits.
+- [ ] Parse plain-text, tab-separated, and JSON command output.
+- [ ] Show plugin command failures inside the palette.
+- [ ] Remove the TypeScript/Bun implementation and all Bun documentation.
+- [ ] Complete the alpha acceptance matrix and tag `v0.1.0-alpha.1`.
+- [ ] Prepare and verify the crates.io package.
+- [ ] Publish the beta and validate the `cargo install` workflow.
+
+### Verification matrix
+
+- [x] `cargo fmt --check`.
+- [x] `cargo clippy --all-targets -- -D warnings`.
+- [x] Rust unit and wrapper integration tests.
+- [x] Commands popup navigation and tmux dispatch smoke test on macOS with
+      tmux 3.7b.
+- [ ] macOS test on the minimum supported tmux 3.4 release.
+- [ ] Linux build and real-tmux smoke test.
+- [ ] Kitty, Ghostty, iTerm2, WezTerm, and Terminal.app checks.
+- [ ] SSH, nested tmux, and narrow mobile terminal checks.
+- [ ] Terminal cleanup checks for signals and forced subprocess failures.
+- [ ] Startup-time measurement against the Bun implementation.
