@@ -14,7 +14,10 @@ dependencies, and opens quickly enough to use as a regular tmux binding.
 > the padded layout also renders descriptions, alias chips, shortcuts, and
 > empty states in parity with the Bun palette, including Unicode-aware terminal
 > widths for truncation, alignment, and search cursor placement. Mouse wheel,
-> row activation, and the clickable escape label are supported as well.
+> row activation, and the clickable escape label are supported as well. Narrow
+> clients use the edge-to-edge mobile layout; when the wrapper marks a popup as
+> bordered, the renderer replaces its outer padding rows without shifting
+> content or mouse targets.
 > User configuration and the dynamic built-in palettes have not been ported yet.
 > The existing `bin/tmux-palette.sh` development wrapper now launches this
 > binary. Re-run `cargo build` after Rust source changes; tmux does not compile

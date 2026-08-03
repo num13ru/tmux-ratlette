@@ -574,7 +574,7 @@ fn desired_height(palette: &Palette) -> u16 {
     } else {
         0
     };
-    let content_rows = palette.items.len().saturating_add(categories).max(1);
+    let content_rows = palette.items.len().saturating_add(categories);
     u16::try_from(content_rows)
         .unwrap_or(u16::MAX)
         .saturating_add(UNBORDERED_CHROME_ROWS)
@@ -1028,6 +1028,14 @@ mod tests {
     }
 
     #[test]
+    fn empty_palette_measurement_uses_only_the_seven_chrome_rows() {
+        assert_eq!(
+            desired_height(&test_palette(Vec::new())),
+            DEFAULT_EMPTY_HEIGHT
+        );
+    }
+
+    #[test]
     fn narrow_clients_use_full_width_and_height() {
         let result = measure(NonZeroU16::new(60), NonZeroU16::new(30));
 
@@ -1473,6 +1481,55 @@ mod tests {
         assert!(buffer_row(&terminal, 2).trim().is_empty());
         assert!(buffer_row(&terminal, 3).contains("Run"));
         assert!(buffer_row(&terminal, 9).starts_with(" enter select"));
+    }
+
+    #[test]
+    fn narrow_layout_uses_mobile_padding_and_full_frame_rows() {
+        let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
+        let mut palette = test_palette(vec![test_item("Run")]);
+        palette.grouped = false;
+        let mut app = App::new_with_layout(
+            palette,
+            None,
+            LayoutOptions {
+                pad_x: 1,
+                bordered: false,
+            },
+        );
+
+        terminal.draw(|frame| render(frame, &mut app)).unwrap();
+
+        assert!(buffer_row(&terminal, 0).trim().is_empty());
+        assert!(buffer_row(&terminal, 1).starts_with(" Test"));
+        assert!(buffer_row(&terminal, 1).ends_with("esc "));
+        assert!(buffer_row(&terminal, 2).starts_with(" ▌ Search"));
+        assert!(buffer_row(&terminal, 4).contains("Run"));
+        assert!(buffer_row(&terminal, 10).starts_with(" enter select"));
+        assert!(buffer_row(&terminal, 11).trim().is_empty());
+        terminal.backend_mut().assert_cursor_position((3, 2));
+    }
+
+    #[test]
+    fn bordered_content_height_replaces_the_two_outer_padding_rows() {
+        let unbordered = list_rect(
+            Rect::new(0, 0, 60, 12),
+            LayoutOptions {
+                pad_x: 1,
+                bordered: false,
+            },
+        )
+        .unwrap();
+        let bordered = list_rect(
+            Rect::new(0, 0, 58, 10),
+            LayoutOptions {
+                pad_x: 1,
+                bordered: true,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(unbordered, Rect::new(0, 4, 60, 5));
+        assert_eq!(bordered, Rect::new(0, 3, 58, 5));
     }
 
     #[test]
