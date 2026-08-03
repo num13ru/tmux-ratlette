@@ -151,7 +151,7 @@ Recommended initial dependencies:
 ```toml
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-crossterm = "0.29"
+crossterm = "0.28"
 ratatui = "0.29"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -1428,8 +1428,7 @@ theme parity remains in the later dynamic-theme phase.
 - [x] Add terminal-cell-aware Unicode truncation and padding.
 - [x] Add mouse click and wheel behavior, including off-screen rows.
 - [x] Complete narrow-terminal and bordered-popup layout parity.
-- [ ] Compare Rust and TypeScript screenshots at representative popup sizes.
-      **Next.**
+- [x] Compare Rust and TypeScript screenshots at representative popup sizes.
 
 Search works when the same query produces the same ordered items as TypeScript,
 editing remains correct for Unicode text and boundary keys, selection stays
@@ -1437,7 +1436,7 @@ visible after filtering/resizing, and the popup remains usable with zero results
 
 ### Remaining port phases
 
-- [ ] Port `find-pane` and its initial current-pane selection.
+- [ ] Port `find-pane` and its initial current-pane selection. **Next.**
 - [ ] Port `move-pane`.
 - [ ] Port bundled and user themes with live preview and atomic persistence.
 - [ ] Add the nested palette navigation stack and Escape/back behavior.

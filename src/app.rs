@@ -37,6 +37,7 @@ struct ThemeStyles {
     category: Style,
     item: Style,
     selected: Style,
+    selected_title: Style,
     accent: Style,
     selected_accent: Style,
     muted: Style,
@@ -55,7 +56,8 @@ impl ThemeStyles {
                 .add_modifier(Modifier::BOLD),
             category: themed_style(theme.accent, theme.panel).add_modifier(Modifier::BOLD),
             item: themed_style(theme.muted, theme.panel),
-            selected: themed_style(selected_fg, theme.selected).add_modifier(Modifier::BOLD),
+            selected: themed_style(selected_fg, theme.selected),
+            selected_title: themed_style(selected_fg, theme.selected).add_modifier(Modifier::BOLD),
             accent: themed_style(theme.accent, theme.panel),
             selected_accent: themed_style(selected_accent, theme.selected),
             muted: themed_style(theme.muted, theme.panel),
@@ -824,6 +826,11 @@ fn render_item(
     } else {
         styles.accent
     };
+    let title = if selected {
+        styles.selected_title
+    } else {
+        styles.item
+    };
     frame.render_widget(Block::default().style(style), area);
     let content = content_rect(area, layout.pad_x);
     if content.is_empty() {
@@ -836,7 +843,7 @@ fn render_item(
         Span::styled(" ", style),
         Span::styled(icon, accent),
         Span::styled("  ", style),
-        Span::styled(item.title.as_str(), style),
+        Span::styled(item.title.as_str(), title),
     ];
     if let Some(alias) = item.aliases.first() {
         spans.push(Span::styled("  ", style));
@@ -1446,6 +1453,10 @@ mod tests {
         assert_eq!(buffer[(46, 5)].symbol(), "r");
         assert_eq!(buffer[(44, 5)].fg, ratatui::style::Color::Rgb(250, 208, 0));
         assert_eq!(buffer[(47, 5)].bg, ratatui::style::Color::Rgb(80, 77, 122));
+        assert!(!buffer[(3, 5)].modifier.contains(Modifier::BOLD));
+        assert!(buffer[(8, 5)].modifier.contains(Modifier::BOLD));
+        assert!(!buffer[(17, 5)].modifier.contains(Modifier::BOLD));
+        assert!(!buffer[(44, 5)].modifier.contains(Modifier::BOLD));
     }
 
     #[test]

@@ -22,7 +22,8 @@ dependencies, and opens quickly enough to use as a regular tmux binding.
 > The existing `bin/tmux-palette.sh` development wrapper now launches this
 > binary. Re-run `cargo build` after Rust source changes; tmux does not compile
 > the checkout automatically. Set `@palette-binary` or `TMUX_PALETTE_BIN` to
-> override binary discovery.
+> override binary discovery. Run `bun run compare:rendering` to compare the
+> Rust and TypeScript terminal frames at default, narrow, and bordered sizes.
 
 Type a few letters, pick a command, hit enter: split a pane, jump to a window,
 detach a session, open a popup tool, or switch to a custom palette. User config

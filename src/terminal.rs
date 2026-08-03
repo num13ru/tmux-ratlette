@@ -3,6 +3,7 @@ use std::io::{self, IsTerminal, Stdout};
 use crossterm::cursor::{Hide, Show};
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::execute;
+use crossterm::style::force_color_output;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
@@ -21,6 +22,9 @@ impl TerminalSession {
             return Err(Error::NotInteractive);
         }
 
+        // The palette has an explicit theme and its TypeScript predecessor
+        // renders that theme even when NO_COLOR is inherited from a parent.
+        force_color_output(true);
         enable_raw_mode().map_err(Error::Terminal)?;
 
         let mut stdout = io::stdout();

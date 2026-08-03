@@ -13,6 +13,7 @@
     "check:dead-code": "fallow dead-code",
     "check:dupes": "fallow dupes",
     "check:format": "git ls-files -z '*.ts' '*.json' '*.jsonc' '*.yml' '*.yaml' | xargs -0 oxfmt --check",
+    "compare:rendering": "bun scripts/compare-rendering.ts",
     "format": "git ls-files -z '*.ts' '*.json' '*.jsonc' '*.yml' '*.yaml' | xargs -0 oxfmt --write"
   },
   "dependencies": {},
