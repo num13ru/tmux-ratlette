@@ -9,6 +9,10 @@ dependencies, and opens quickly enough to use as a regular tmux binding.
 > experimental bootstrap with `cargo build` and run it as
 > `target/debug/tmux-ratlette`; it currently provides CLI parsing, popup
 > measurement defaults, terminal setup, and a placeholder TUI only.
+> The existing `bin/tmux-palette.sh` development wrapper now launches this
+> binary. Re-run `cargo build` after Rust source changes; tmux does not compile
+> the checkout automatically. Set `@palette-binary` or `TMUX_PALETTE_BIN` to
+> override binary discovery.
 
 Type a few letters, pick a command, hit enter: split a pane, jump to a window,
 detach a session, open a popup tool, or switch to a custom palette. User config
