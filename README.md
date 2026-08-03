@@ -13,7 +13,8 @@ dependencies, and opens quickly enough to use as a regular tmux binding.
 > dispatch. Fuzzy search supports initials, aliases, and multi-word queries;
 > the padded layout also renders descriptions, alias chips, shortcuts, and
 > empty states in parity with the Bun palette, including Unicode-aware terminal
-> widths for truncation, alignment, and search cursor placement.
+> widths for truncation, alignment, and search cursor placement. Mouse wheel,
+> row activation, and the clickable escape label are supported as well.
 > User configuration and the dynamic built-in palettes have not been ported yet.
 > The existing `bin/tmux-palette.sh` development wrapper now launches this
 > binary. Re-run `cargo build` after Rust source changes; tmux does not compile

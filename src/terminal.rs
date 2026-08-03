@@ -6,6 +6,7 @@ use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
 
 use crate::{Error, Result};
 
@@ -50,13 +51,13 @@ impl TerminalSession {
         })
     }
 
-    pub fn draw<F>(&mut self, draw: F) -> Result<()>
+    pub fn draw<F>(&mut self, draw: F) -> Result<Rect>
     where
         F: FnOnce(&mut ratatui::Frame<'_>),
     {
         self.terminal
             .draw(draw)
-            .map(|_| ())
+            .map(|frame| frame.area)
             .map_err(Error::Terminal)
     }
 }

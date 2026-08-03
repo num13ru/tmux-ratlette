@@ -3,7 +3,10 @@ use std::ffi::OsStr;
 use std::num::NonZeroU16;
 use std::path::PathBuf;
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
+    MouseEventKind,
+};
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Modifier, Style};
@@ -303,6 +306,54 @@ impl App {
         }
     }
 
+    fn handle_mouse(&mut self, mouse: MouseEvent, area: Rect) {
+        match mouse.kind {
+            MouseEventKind::ScrollUp => self.move_selection(-1),
+            MouseEventKind::ScrollDown => self.move_selection(1),
+            MouseEventKind::Down(MouseButton::Left) => {
+                if escape_rect(area, self.layout).is_some_and(|escape| {
+                    mouse.row == escape.y
+                        && mouse.column >= escape.x
+                        && mouse.column < escape.right()
+                }) {
+                    self.should_quit = true;
+                    return;
+                }
+
+                let Some(list) = list_rect(area, self.layout) else {
+                    return;
+                };
+                if mouse.row < list.y
+                    || mouse.row >= list.bottom()
+                    || mouse.column < list.x
+                    || mouse.column >= list.right()
+                {
+                    return;
+                }
+
+                self.ensure_selection_visible(list.height as usize);
+                let row_index = self
+                    .scroll
+                    .saturating_add(mouse.row.saturating_sub(list.y) as usize);
+                let Some(Row::Item(index)) = self.rows().get(row_index).cloned() else {
+                    return;
+                };
+                if !self.palette.items[index].selectable {
+                    return;
+                }
+                self.selected = Some(index);
+                self.status = None;
+                self.activate_selected();
+            }
+            MouseEventKind::Up(_)
+            | MouseEventKind::Drag(_)
+            | MouseEventKind::Moved
+            | MouseEventKind::ScrollLeft
+            | MouseEventKind::ScrollRight
+            | MouseEventKind::Down(MouseButton::Right | MouseButton::Middle) => {}
+        }
+    }
+
     fn insert_character(&mut self, character: char) {
         let byte_index = byte_index_at_character(&self.filter, self.filter_cursor);
         self.filter.insert(byte_index, character);
@@ -545,11 +596,12 @@ fn run_interactive(invocation: &Invocation) -> Result<()> {
     let mut terminal = TerminalSession::enter(!invocation.no_mouse)?;
 
     while !app.should_quit {
-        terminal.draw(|frame| render(frame, &mut app))?;
+        let area = terminal.draw(|frame| render(frame, &mut app))?;
 
         match event::read().map_err(crate::Error::Terminal)? {
             Event::Key(key) => app.handle_key(key),
-            Event::Mouse(_) | Event::Resize(_, _) => {}
+            Event::Mouse(mouse) => app.handle_mouse(mouse, area),
+            Event::Resize(_, _) => {}
             Event::Paste(text) => app.insert_text(&text),
             Event::FocusGained | Event::FocusLost => {}
         }
@@ -573,15 +625,7 @@ fn render(frame: &mut Frame<'_>, app: &mut App) {
         render_search(frame, search, app, &styles);
     }
 
-    if area.height >= app.layout.chrome_rows() {
-        let list_offset = outer_padding.saturating_add(3);
-        let list_height = area.height.saturating_sub(app.layout.chrome_rows());
-        let list = Rect::new(
-            area.x,
-            area.y.saturating_add(list_offset),
-            area.width,
-            list_height,
-        );
+    if let Some(list) = list_rect(area, app.layout) {
         render_list(frame, list, app, &styles);
 
         let footer_offset = area.height.saturating_sub(outer_padding.saturating_add(1));
@@ -589,6 +633,26 @@ fn render(frame: &mut Frame<'_>, app: &mut App) {
             render_footer(frame, footer, app, &styles);
         }
     }
+}
+
+fn list_rect(area: Rect, layout: LayoutOptions) -> Option<Rect> {
+    (area.height >= layout.chrome_rows()).then(|| {
+        let outer_padding = u16::from(!layout.bordered);
+        Rect::new(
+            area.x,
+            area.y.saturating_add(outer_padding.saturating_add(3)),
+            area.width,
+            area.height.saturating_sub(layout.chrome_rows()),
+        )
+    })
+}
+
+fn escape_rect(area: Rect, layout: LayoutOptions) -> Option<Rect> {
+    let outer_padding = u16::from(!layout.bordered);
+    let header = row_at(area, outer_padding)?;
+    let content = content_rect(header, layout.pad_x);
+    let width = width_as_u16(&truncate_width("esc", content.width as usize));
+    (width > 0).then(|| Rect::new(content.right().saturating_sub(width), content.y, width, 1))
 }
 
 fn row_at(area: Rect, offset: u16) -> Option<Rect> {
@@ -909,6 +973,15 @@ mod tests {
         KeyEvent::new(code, KeyModifiers::CONTROL)
     }
 
+    fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
     fn temp_file() -> PathBuf {
         let sequence = NEXT_FILE.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!(
@@ -1003,6 +1076,102 @@ mod tests {
         assert_eq!(app.selected, Some(0));
         app.move_selection(-1);
         assert_eq!(app.selected, Some(2));
+    }
+
+    #[test]
+    fn mouse_wheel_wraps_and_skips_non_selectable_items() {
+        let mut disabled = test_item("Disabled");
+        disabled.selectable = false;
+        let mut app = App::new(
+            test_palette(vec![test_item("First"), disabled, test_item("Last")]),
+            None,
+        );
+        let area = Rect::new(0, 0, 30, 10);
+
+        app.handle_mouse(mouse(MouseEventKind::ScrollDown, 29, 9), area);
+        assert_eq!(app.selected, Some(2));
+        app.handle_mouse(mouse(MouseEventKind::ScrollDown, 0, 0), area);
+        assert_eq!(app.selected, Some(0));
+        app.handle_mouse(mouse(MouseEventKind::ScrollUp, 0, 0), area);
+        assert_eq!(app.selected, Some(2));
+        app.handle_mouse(mouse(MouseEventKind::ScrollLeft, 0, 0), area);
+        assert_eq!(app.selected, Some(2));
+    }
+
+    #[test]
+    fn mouse_click_activates_the_correct_scrolled_row_with_categories() {
+        let path = temp_file();
+        let items = (0..9)
+            .map(|index| test_item(&format!("Item {index}")).category("Group"))
+            .collect();
+        let mut app = App::new(test_palette(items), Some(path.clone()));
+        app.selected = Some(8);
+        let area = Rect::new(0, 0, 30, 10);
+        app.ensure_selection_visible(list_rect(area, app.layout).unwrap().height as usize);
+
+        assert_eq!(app.scroll, 7);
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 0, 4), area);
+
+        assert_eq!(app.selected, Some(6));
+        assert!(app.should_quit);
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "tmux:display-message 'Item 6'"
+        );
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn mouse_click_ignores_categories_disabled_rows_and_non_press_events() {
+        let mut disabled = test_item("Disabled").category("Group");
+        disabled.selectable = false;
+        let mut app = App::new(
+            test_palette(vec![test_item("First").category("Group"), disabled]),
+            None,
+        );
+        let area = Rect::new(0, 0, 30, 12);
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 3, 4), area);
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 3, 6), area);
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), 3, 5), area);
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), 3, 5), area);
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 3, 10), area);
+
+        assert_eq!(app.selected, Some(0));
+        assert_eq!(app.status, None);
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn mouse_escape_hit_tracks_bordered_and_unbordered_headers() {
+        let area = Rect::new(0, 0, 30, 10);
+        let mut unbordered = App::new(test_palette(vec![test_item("Run")]), None);
+        unbordered.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 24, 1), area);
+        assert!(unbordered.should_quit);
+
+        let mut bordered = App::new_with_layout(
+            test_palette(vec![test_item("Run")]),
+            None,
+            LayoutOptions {
+                pad_x: 1,
+                bordered: true,
+            },
+        );
+        bordered.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 26, 0), area);
+        assert!(bordered.should_quit);
+    }
+
+    #[test]
+    fn mouse_events_are_safe_for_empty_and_tiny_layouts() {
+        let mut app = App::new(test_palette(Vec::new()), None);
+        let area = Rect::new(0, 0, 1, 1);
+
+        app.handle_mouse(mouse(MouseEventKind::ScrollDown, 0, 0), area);
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 0, 0), area);
+
+        assert_eq!(app.selected, None);
+        assert_eq!(app.status, None);
+        assert!(!app.should_quit);
     }
 
     #[test]
