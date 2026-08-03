@@ -1424,9 +1424,8 @@ theme parity remains in the later dynamic-theme phase.
 - [x] Re-rank visible items as the query changes and reset invalid selections.
 - [x] Preserve initials/auto-alias and multi-word matching behavior.
 - [x] Add the search row and place the real terminal cursor correctly.
-- [ ] Match header, footer, spacing, descriptions, shortcuts, and empty states.
-      **Next.**
-- [ ] Add terminal-cell-aware Unicode truncation and padding.
+- [x] Match header, footer, spacing, descriptions, shortcuts, and empty states.
+- [ ] Add terminal-cell-aware Unicode truncation and padding. **Next.**
 - [ ] Add mouse click and wheel behavior, including off-screen rows.
 - [ ] Complete narrow-terminal and bordered-popup layout parity.
 - [ ] Compare Rust and TypeScript screenshots at representative popup sizes.

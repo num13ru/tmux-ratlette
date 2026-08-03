@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::ffi::OsStr;
 use std::num::NonZeroU16;
 use std::path::PathBuf;
 
@@ -18,10 +19,11 @@ use crate::{Result, palettes, themes};
 
 const DEFAULT_WIDTH: u16 = 90;
 const DEFAULT_MAX_HEIGHT: u16 = 28;
-const DEFAULT_EMPTY_HEIGHT: u16 = 4;
+const DEFAULT_EMPTY_HEIGHT: u16 = 7;
 const DEFAULT_PAD_X: u16 = 3;
 const DEFAULT_MOBILE_WIDTH: u16 = 80;
-const CHROME_ROWS: u16 = 3;
+const UNBORDERED_CHROME_ROWS: u16 = 7;
+const BORDERED_CHROME_ROWS: u16 = 5;
 const PAGE_SIZE: isize = 10;
 
 #[derive(Debug, Clone, Copy)]
@@ -36,6 +38,7 @@ struct ThemeStyles {
     muted: Style,
     selected_muted: Style,
     status: Style,
+    alias: Style,
 }
 
 impl ThemeStyles {
@@ -54,6 +57,7 @@ impl ThemeStyles {
             muted: themed_style(theme.muted, theme.panel),
             selected_muted: themed_style(theme.muted, theme.selected),
             status: themed_style(theme.accent, theme.panel),
+            alias: themed_style(theme.fg, theme.bg),
         }
     }
 }
@@ -90,6 +94,49 @@ enum Row {
     Item(usize),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LayoutOptions {
+    pad_x: u16,
+    bordered: bool,
+}
+
+impl Default for LayoutOptions {
+    fn default() -> Self {
+        Self {
+            pad_x: DEFAULT_PAD_X,
+            bordered: false,
+        }
+    }
+}
+
+impl LayoutOptions {
+    fn from_env() -> Self {
+        Self::from_values(
+            std::env::var_os("TMUX_PALETTE_PADX").as_deref(),
+            std::env::var_os("TMUX_PALETTE_BORDERED").as_deref(),
+        )
+    }
+
+    fn from_values(pad_x: Option<&OsStr>, bordered: Option<&OsStr>) -> Self {
+        let pad_x = pad_x
+            .and_then(OsStr::to_str)
+            .and_then(|value| value.parse::<u16>().ok())
+            .unwrap_or(DEFAULT_PAD_X);
+        Self {
+            pad_x,
+            bordered: bordered == Some(OsStr::new("1")),
+        }
+    }
+
+    fn chrome_rows(self) -> u16 {
+        if self.bordered {
+            BORDERED_CHROME_ROWS
+        } else {
+            UNBORDERED_CHROME_ROWS
+        }
+    }
+}
+
 #[derive(Debug)]
 struct App {
     palette: Palette,
@@ -97,13 +144,23 @@ struct App {
     scroll: usize,
     filter: String,
     filter_cursor: usize,
+    layout: LayoutOptions,
     status: Option<String>,
     dispatch_path: Option<PathBuf>,
     should_quit: bool,
 }
 
 impl App {
+    #[cfg(test)]
     fn new(palette: Palette, dispatch_path: Option<PathBuf>) -> Self {
+        Self::new_with_layout(palette, dispatch_path, LayoutOptions::default())
+    }
+
+    fn new_with_layout(
+        palette: Palette,
+        dispatch_path: Option<PathBuf>,
+        layout: LayoutOptions,
+    ) -> Self {
         let selected = first_selectable(&palette.items);
         Self {
             palette,
@@ -111,18 +168,19 @@ impl App {
             scroll: 0,
             filter: String::new(),
             filter_cursor: 0,
+            layout,
             status: None,
             dispatch_path,
             should_quit: false,
         }
     }
 
-    fn unsupported(name: &str, dispatch_path: Option<PathBuf>) -> Self {
+    fn unsupported(name: &str, dispatch_path: Option<PathBuf>, layout: LayoutOptions) -> Self {
         let title = display_palette_name(name);
         let mut palette = Palette::new(name, &title, Vec::new());
         palette.grouped = false;
         palette.empty_text = format!("The {title} palette has not been ported to Rust yet");
-        let mut app = Self::new(palette, dispatch_path);
+        let mut app = Self::new_with_layout(palette, dispatch_path, layout);
         app.status = Some("Esc closes this placeholder".to_owned());
         app
     }
@@ -467,20 +525,21 @@ fn desired_height(palette: &Palette) -> u16 {
     let content_rows = palette.items.len().saturating_add(categories).max(1);
     u16::try_from(content_rows)
         .unwrap_or(u16::MAX)
-        .saturating_add(CHROME_ROWS)
+        .saturating_add(UNBORDERED_CHROME_ROWS)
         .clamp(DEFAULT_EMPTY_HEIGHT, DEFAULT_MAX_HEIGHT)
 }
 
 fn run_interactive(invocation: &Invocation) -> Result<()> {
     let dispatch_path = std::env::var_os("TMUX_PALETTE_CMD").map(PathBuf::from);
+    let layout = LayoutOptions::from_env();
     let mut app = match palettes::load(&invocation.palette) {
         Some(mut palette) => {
             if let Some(category) = invocation.category.as_deref() {
                 palette.filter_category(category);
             }
-            App::new(palette, dispatch_path)
+            App::new_with_layout(palette, dispatch_path, layout)
         }
-        None => App::unsupported(&invocation.palette, dispatch_path),
+        None => App::unsupported(&invocation.palette, dispatch_path, layout),
     };
     let mut terminal = TerminalSession::enter(!invocation.no_mouse)?;
 
@@ -505,50 +564,75 @@ fn render(frame: &mut Frame<'_>, app: &mut App) {
     let styles = ThemeStyles::new(app.palette.theme);
     frame.render_widget(Block::default().style(styles.panel), area);
 
-    let header = Rect::new(area.x, area.y, area.width, 1);
-    render_header(frame, header, &app.palette.title, &styles);
-
-    let search_height = u16::from(area.height >= 2);
-    if search_height == 1 {
-        let search = Rect::new(area.x, area.y.saturating_add(1), area.width, 1);
+    let outer_padding = u16::from(!app.layout.bordered);
+    if let Some(header) = row_at(area, outer_padding) {
+        render_header(frame, header, &app.palette.title, app.layout, &styles);
+    }
+    if let Some(search) = row_at(area, outer_padding.saturating_add(1)) {
         render_search(frame, search, app, &styles);
     }
 
-    let footer_height = u16::from(area.height >= 3);
-    let list_y = area.y.saturating_add(1 + search_height);
-    let list_height = area
-        .height
-        .saturating_sub(1 + search_height + footer_height);
-    let list = Rect::new(area.x, list_y, area.width, list_height);
-    render_list(frame, list, app, &styles);
+    if area.height >= app.layout.chrome_rows() {
+        let list_offset = outer_padding.saturating_add(3);
+        let list_height = area.height.saturating_sub(app.layout.chrome_rows());
+        let list = Rect::new(
+            area.x,
+            area.y.saturating_add(list_offset),
+            area.width,
+            list_height,
+        );
+        render_list(frame, list, app, &styles);
 
-    if footer_height == 1 {
-        let footer = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
-        render_footer(frame, footer, app, &styles);
+        let footer_offset = area.height.saturating_sub(outer_padding.saturating_add(1));
+        if let Some(footer) = row_at(area, footer_offset) {
+            render_footer(frame, footer, app, &styles);
+        }
     }
 }
 
-fn render_header(frame: &mut Frame<'_>, area: Rect, title: &str, styles: &ThemeStyles) {
-    let escape = "esc";
-    let available = area.width.saturating_sub(escape.len() as u16) as usize;
+fn row_at(area: Rect, offset: u16) -> Option<Rect> {
+    (offset < area.height).then(|| Rect::new(area.x, area.y + offset, area.width, 1))
+}
+
+fn content_rect(area: Rect, requested_padding: u16) -> Rect {
+    let padding = requested_padding.min(area.width.saturating_sub(1) / 2);
+    Rect::new(
+        area.x.saturating_add(padding),
+        area.y,
+        area.width.saturating_sub(padding.saturating_mul(2)),
+        area.height,
+    )
+}
+
+fn render_header(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    title: &str,
+    layout: LayoutOptions,
+    styles: &ThemeStyles,
+) {
+    let content = content_rect(area, layout.pad_x);
+    let escape = truncate_chars("esc", content.width as usize);
+    let available = content.width.saturating_sub(escape.chars().count() as u16) as usize;
     let title = truncate_chars(title, available);
-    let gap = area
+    let gap = content
         .width
         .saturating_sub(title.chars().count() as u16)
-        .saturating_sub(escape.len() as u16) as usize;
+        .saturating_sub(escape.chars().count() as u16) as usize;
     let line = Line::from(vec![
         Span::styled(title, styles.header),
         Span::styled(" ".repeat(gap), styles.panel),
         Span::styled(escape, styles.muted),
     ]);
-    frame.render_widget(Paragraph::new(line).style(styles.panel), area);
+    frame.render_widget(Paragraph::new(line).style(styles.panel), content);
 }
 
 fn render_search(frame: &mut Frame<'_>, area: Rect, app: &App, styles: &ThemeStyles) {
-    if area.is_empty() {
+    let content_area = content_rect(area, app.layout.pad_x);
+    if content_area.is_empty() {
         return;
     }
-    let text_width = area.width.saturating_sub(2) as usize;
+    let text_width = content_area.width.saturating_sub(2) as usize;
     let (visible, cursor_offset) = search_window(&app.filter, app.filter_cursor, text_width);
     let content = if app.filter.is_empty() {
         Span::styled(truncate_chars("Search", text_width), styles.muted)
@@ -562,15 +646,15 @@ fn render_search(frame: &mut Frame<'_>, area: Rect, app: &App, styles: &ThemeSty
             content,
         ]))
         .style(styles.panel),
-        area,
+        content_area,
     );
 
-    let cursor_x = area
+    let cursor_x = content_area
         .x
         .saturating_add(2)
         .saturating_add(u16::try_from(cursor_offset).unwrap_or(u16::MAX))
-        .min(area.right().saturating_sub(1));
-    frame.set_cursor_position((cursor_x, area.y));
+        .min(content_area.right().saturating_sub(1));
+    frame.set_cursor_position((cursor_x, content_area.y));
 }
 
 fn search_window(value: &str, cursor: usize, width: usize) -> (String, usize) {
@@ -593,10 +677,14 @@ fn render_list(frame: &mut Frame<'_>, area: Rect, app: &mut App, styles: &ThemeS
     app.ensure_selection_visible(area.height as usize);
     let rows = app.rows();
     if rows.is_empty() {
+        let content = content_rect(area, app.layout.pad_x);
         frame.render_widget(
-            Paragraph::new(truncate_chars(&app.palette.empty_text, area.width as usize))
-                .style(styles.muted),
-            area,
+            Paragraph::new(truncate_chars(
+                &app.palette.empty_text,
+                content.width as usize,
+            ))
+            .style(styles.muted),
+            content,
         );
         return;
     }
@@ -614,19 +702,20 @@ fn render_list(frame: &mut Frame<'_>, area: Rect, app: &mut App, styles: &ThemeS
             1,
         );
         match row {
-            Row::Category(category) => frame.render_widget(
-                Paragraph::new(Line::from(vec![
-                    Span::styled("  ", styles.panel),
-                    Span::styled(category.as_str(), styles.category),
-                ]))
-                .style(styles.panel),
-                row_area,
-            ),
+            Row::Category(category) => {
+                let content = content_rect(row_area, app.layout.pad_x);
+                frame.render_widget(
+                    Paragraph::new(Span::styled(category.as_str(), styles.category))
+                        .style(styles.panel),
+                    content,
+                );
+            }
             Row::Item(index) => render_item(
                 frame,
                 row_area,
                 &app.palette.items[*index],
                 app.selected == Some(*index),
+                app.layout,
                 styles,
             ),
         }
@@ -638,6 +727,7 @@ fn render_item(
     area: Rect,
     item: &Item,
     selected: bool,
+    layout: LayoutOptions,
     styles: &ThemeStyles,
 ) {
     let style = if selected {
@@ -650,6 +740,11 @@ fn render_item(
     } else {
         styles.accent
     };
+    frame.render_widget(Block::default().style(style), area);
+    let content = content_rect(area, layout.pad_x);
+    if content.is_empty() {
+        return;
+    }
     let marker = if selected { "▌" } else { " " };
     let icon = item.icon.as_deref().unwrap_or(" ");
     let mut spans = vec![
@@ -659,6 +754,10 @@ fn render_item(
         Span::styled("  ", style),
         Span::styled(item.title.as_str(), style),
     ];
+    if let Some(alias) = item.aliases.first() {
+        spans.push(Span::styled("  ", style));
+        spans.push(Span::styled(format!(" {alias} "), styles.alias));
+    }
     if let Some(description) = item.description.as_deref() {
         spans.push(Span::styled(
             format!(" - {description}"),
@@ -669,7 +768,31 @@ fn render_item(
             },
         ));
     }
-    frame.render_widget(Paragraph::new(Line::from(spans)).style(style), area);
+    frame.render_widget(Paragraph::new(Line::from(spans)).style(style), content);
+
+    if let Some(shortcut) = item.shortcut.as_deref() {
+        let shortcut = truncate_chars(shortcut, content.width.saturating_sub(1) as usize);
+        let shortcut_width = u16::try_from(shortcut.chars().count().saturating_add(1))
+            .unwrap_or(u16::MAX)
+            .min(content.width);
+        let shortcut_area = Rect::new(
+            content.right().saturating_sub(shortcut_width),
+            content.y,
+            shortcut_width,
+            1,
+        );
+        let shortcut_style = if selected {
+            styles.selected_accent
+        } else {
+            styles.muted
+        };
+        frame.render_widget(
+            Paragraph::new(Span::styled(format!(" {shortcut}"), shortcut_style))
+                .style(style)
+                .alignment(Alignment::Right),
+            shortcut_area,
+        );
+    }
 }
 
 fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App, styles: &ThemeStyles) {
@@ -692,11 +815,12 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App, styles: &ThemeSty
             }
         }
     };
+    let content = content_rect(area, app.layout.pad_x);
     frame.render_widget(
-        Paragraph::new(truncate_chars(&text, area.width as usize))
+        Paragraph::new(truncate_chars(&text, content.width as usize))
             .style(style)
             .alignment(Alignment::Left),
-        area,
+        content,
     );
 }
 
@@ -771,6 +895,13 @@ mod tests {
             .join("\n")
     }
 
+    fn buffer_row(terminal: &Terminal<TestBackend>, y: u16) -> String {
+        let buffer = terminal.backend().buffer();
+        (buffer.area.x..buffer.area.right())
+            .map(|x| buffer[(x, y)].symbol())
+            .collect()
+    }
+
     #[test]
     fn default_measurement_fits_the_commands_palette_cap() {
         let result = measure(None, None);
@@ -785,7 +916,7 @@ mod tests {
     fn category_measurement_uses_only_matching_commands() {
         let result = measure_palette("commands", Some("System"), None, None);
 
-        assert_eq!(result.rows, 4);
+        assert_eq!(result.rows, 8);
     }
 
     #[test]
@@ -802,6 +933,24 @@ mod tests {
         let result = measure_palette("missing", None, NonZeroU16::new(60), NonZeroU16::new(2));
 
         assert_eq!(result.rows, DEFAULT_EMPTY_HEIGHT);
+    }
+
+    #[test]
+    fn layout_options_validate_environment_values() {
+        assert_eq!(
+            LayoutOptions::from_values(Some(OsStr::new("5")), Some(OsStr::new("1"))),
+            LayoutOptions {
+                pad_x: 5,
+                bordered: true,
+            }
+        );
+        assert_eq!(
+            LayoutOptions::from_values(Some(OsStr::new("-1")), Some(OsStr::new("true"))),
+            LayoutOptions::default()
+        );
+
+        let content = content_rect(Rect::new(0, 0, 4, 1), u16::MAX);
+        assert_eq!(content, Rect::new(1, 0, 2, 1));
     }
 
     #[test]
@@ -950,7 +1099,7 @@ mod tests {
 
     #[test]
     fn rendering_shows_commands_and_selection() {
-        let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(50, 12)).unwrap();
         let mut app = App::new(
             test_palette(vec![
                 test_item("First").category("Group"),
@@ -971,7 +1120,7 @@ mod tests {
 
     #[test]
     fn rendering_shows_the_query_and_omits_categories_while_filtering() {
-        let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
         let mut app = App::new(
             test_palette(vec![
                 test_item("First").category("Group"),
@@ -989,8 +1138,8 @@ mod tests {
         assert!(text.contains("First"));
         assert!(!text.contains("Group"));
         assert!(!text.contains("Second"));
-        assert_eq!(buffer[(2, 1)].symbol(), "f");
-        assert_eq!(buffer[(0, 2)].bg, ratatui::style::Color::Rgb(80, 77, 122));
+        assert_eq!(buffer[(5, 2)].symbol(), "f");
+        assert_eq!(buffer[(0, 4)].bg, ratatui::style::Color::Rgb(80, 77, 122));
     }
 
     #[test]
@@ -1002,7 +1151,7 @@ mod tests {
 
     #[test]
     fn rendering_applies_the_default_bundled_theme() {
-        let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
         let mut app = App::new(
             test_palette(vec![test_item("First").category("Group")]),
             None,
@@ -1012,11 +1161,68 @@ mod tests {
         let buffer = terminal.backend().buffer();
 
         assert_eq!(buffer[(0, 0)].bg, ratatui::style::Color::Rgb(45, 43, 85));
-        assert_eq!(buffer[(0, 0)].fg, ratatui::style::Color::Rgb(255, 255, 255));
-        assert_eq!(buffer[(2, 2)].fg, ratatui::style::Color::Rgb(250, 208, 0));
-        assert_eq!(buffer[(0, 3)].bg, ratatui::style::Color::Rgb(80, 77, 122));
-        assert_eq!(buffer[(0, 3)].fg, ratatui::style::Color::Rgb(250, 208, 0));
-        assert_eq!(buffer[(5, 3)].fg, ratatui::style::Color::Rgb(255, 255, 255));
+        assert_eq!(buffer[(3, 1)].fg, ratatui::style::Color::Rgb(255, 255, 255));
+        assert_eq!(buffer[(3, 4)].fg, ratatui::style::Color::Rgb(250, 208, 0));
+        assert_eq!(buffer[(0, 5)].bg, ratatui::style::Color::Rgb(80, 77, 122));
+        assert_eq!(buffer[(3, 5)].fg, ratatui::style::Color::Rgb(250, 208, 0));
+        assert_eq!(buffer[(8, 5)].fg, ratatui::style::Color::Rgb(255, 255, 255));
+    }
+
+    #[test]
+    fn rendering_matches_padding_alias_description_and_shortcut_layout() {
+        let mut terminal = Terminal::new(TestBackend::new(50, 12)).unwrap();
+        let mut item = test_item("Run").category("Tools").description("tool");
+        item.aliases.push("r".to_owned());
+        item.shortcut = Some("C-r".to_owned());
+        let mut app = App::new(test_palette(vec![item]), None);
+
+        terminal.draw(|frame| render(frame, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let row = buffer_row(&terminal, 5);
+
+        assert!(buffer_row(&terminal, 1).starts_with("   Test"));
+        assert!(row.contains("Run   r  - tool"));
+        assert_eq!(buffer[(13, 5)].bg, ratatui::style::Color::Rgb(30, 29, 64));
+        assert_eq!(buffer[(44, 5)].symbol(), "C");
+        assert_eq!(buffer[(45, 5)].symbol(), "-");
+        assert_eq!(buffer[(46, 5)].symbol(), "r");
+        assert_eq!(buffer[(44, 5)].fg, ratatui::style::Color::Rgb(250, 208, 0));
+        assert_eq!(buffer[(47, 5)].bg, ratatui::style::Color::Rgb(80, 77, 122));
+    }
+
+    #[test]
+    fn rendering_repeats_the_empty_state_in_the_list_and_footer() {
+        let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+        let mut app = App::new(test_palette(vec![test_item("Run")]), None);
+        app.insert_text("zzzz");
+
+        terminal.draw(|frame| render(frame, &mut app)).unwrap();
+
+        assert!(buffer_row(&terminal, 4).starts_with("   No results"));
+        assert!(buffer_row(&terminal, 10).starts_with("   No results"));
+    }
+
+    #[test]
+    fn bordered_layout_omits_outer_padding_rows() {
+        let mut terminal = Terminal::new(TestBackend::new(30, 10)).unwrap();
+        let mut palette = test_palette(vec![test_item("Run")]);
+        palette.grouped = false;
+        let mut app = App::new_with_layout(
+            palette,
+            None,
+            LayoutOptions {
+                pad_x: 1,
+                bordered: true,
+            },
+        );
+
+        terminal.draw(|frame| render(frame, &mut app)).unwrap();
+
+        assert!(buffer_row(&terminal, 0).starts_with(" Test"));
+        assert!(buffer_row(&terminal, 1).starts_with(" ▌ Search"));
+        assert!(buffer_row(&terminal, 2).trim().is_empty());
+        assert!(buffer_row(&terminal, 3).contains("Run"));
+        assert!(buffer_row(&terminal, 9).starts_with(" enter select"));
     }
 
     #[test]
