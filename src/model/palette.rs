@@ -16,7 +16,7 @@ impl Palette {
             name: name.into(),
             title: title.into(),
             grouped: true,
-            empty_text: "No commands".to_owned(),
+            empty_text: "No results".to_owned(),
             theme: crate::themes::default_theme(),
             items,
         }

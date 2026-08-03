@@ -10,8 +10,8 @@ dependencies, and opens quickly enough to use as a regular tmux binding.
 > `target/debug/tmux-ratlette`; it currently provides CLI parsing, popup
 > measurement, terminal setup, and a static built-in Commands palette with
 > the default bundled theme, keyboard navigation, scrolling, and tmux command
-> dispatch. Search, user configuration, and the dynamic built-in palettes have
-> not been ported yet.
+> dispatch. Fuzzy search supports initials, aliases, and multi-word queries.
+> User configuration and the dynamic built-in palettes have not been ported yet.
 > The existing `bin/tmux-palette.sh` development wrapper now launches this
 > binary. Re-run `cargo build` after Rust source changes; tmux does not compile
 > the checkout automatically. Set `@palette-binary` or `TMUX_PALETTE_BIN` to

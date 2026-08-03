@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { defaultFilter, multiFuzzyScore } from "../src/fuzzy";
 import type { Item } from "../src/types";
 
@@ -39,4 +40,27 @@ describe("defaultFilter", () => {
     expect(ranked[0]).toBe("New Session");
     expect(ranked[1]).toBe("Next Session");
   });
+});
+
+describe("shared Rust/TypeScript parity fixtures", () => {
+  const fixture = readFileSync(new URL("./fixtures/fuzzy-parity.tsv", import.meta.url), "utf8");
+
+  for (const line of fixture.split("\n")) {
+    if (!line.trim() || line.startsWith("#")) continue;
+    const [query, itemSpecs = "", expected = ""] = line.split("\t");
+    const fixtureItems: Item[] = itemSpecs.split("|").map((spec) => {
+      const [title = "", category = "", aliases = ""] = spec.split("~");
+      return {
+        title,
+        category: category || undefined,
+        aliases: aliases ? aliases.split(",") : undefined,
+        action: noop,
+      };
+    });
+
+    test(`ranks ${JSON.stringify(query)}`, () => {
+      const actual = defaultFilter(fixtureItems, query).map((item) => item.title);
+      expect(actual).toEqual(expected ? expected.split("|") : []);
+    });
+  }
 });

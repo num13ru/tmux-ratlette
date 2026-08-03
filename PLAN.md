@@ -1412,19 +1412,20 @@ the source of truth for architecture and acceptance criteria.
       fixed Ratatui styles.
 
 Phase 2's functional exit condition is met: the main Commands palette is usable
-without search or custom configuration. Theme parity remains open and is tracked
-with the rendering work below.
+without custom configuration. Default theme support is complete; user-selectable
+theme parity remains in the later dynamic-theme phase.
 
 ### Next: search and rendering parity
 
-- [ ] Port the TypeScript fuzzy matcher with shared parity fixtures. **Next.**
-- [ ] Add filter text, cursor position, and selection state to the Rust app.
-- [ ] Handle character insertion, Backspace, Delete, Left/Right, and word-wise
+- [x] Port the TypeScript fuzzy matcher with shared parity fixtures.
+- [x] Add filter text, cursor position, and selection state to the Rust app.
+- [x] Handle character insertion, Backspace, Delete, Left/Right, and word-wise
       cursor movement without corrupting UTF-8 input.
-- [ ] Re-rank visible items as the query changes and reset invalid selections.
-- [ ] Preserve initials/auto-alias and multi-word matching behavior.
-- [ ] Add the search row and place the real terminal cursor correctly.
+- [x] Re-rank visible items as the query changes and reset invalid selections.
+- [x] Preserve initials/auto-alias and multi-word matching behavior.
+- [x] Add the search row and place the real terminal cursor correctly.
 - [ ] Match header, footer, spacing, descriptions, shortcuts, and empty states.
+      **Next.**
 - [ ] Add terminal-cell-aware Unicode truncation and padding.
 - [ ] Add mouse click and wheel behavior, including off-screen rows.
 - [ ] Complete narrow-terminal and bordered-popup layout parity.

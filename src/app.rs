@@ -18,10 +18,10 @@ use crate::{Result, palettes, themes};
 
 const DEFAULT_WIDTH: u16 = 90;
 const DEFAULT_MAX_HEIGHT: u16 = 28;
-const DEFAULT_EMPTY_HEIGHT: u16 = 3;
+const DEFAULT_EMPTY_HEIGHT: u16 = 4;
 const DEFAULT_PAD_X: u16 = 3;
 const DEFAULT_MOBILE_WIDTH: u16 = 80;
-const CHROME_ROWS: u16 = 2;
+const CHROME_ROWS: u16 = 3;
 const PAGE_SIZE: isize = 10;
 
 #[derive(Debug, Clone, Copy)]
@@ -95,6 +95,8 @@ struct App {
     palette: Palette,
     selected: Option<usize>,
     scroll: usize,
+    filter: String,
+    filter_cursor: usize,
     status: Option<String>,
     dispatch_path: Option<PathBuf>,
     should_quit: bool,
@@ -107,6 +109,8 @@ impl App {
             palette,
             selected,
             scroll: 0,
+            filter: String::new(),
+            filter_cursor: 0,
             status: None,
             dispatch_path,
             should_quit: false,
@@ -123,12 +127,18 @@ impl App {
         app
     }
 
+    fn visible_indices(&self) -> Vec<usize> {
+        crate::fuzzy::default_filter(&self.palette.items, &self.filter)
+    }
+
     fn rows(&self) -> Vec<Row> {
         let mut rows = Vec::new();
         let mut last_category: Option<&str> = None;
 
-        for (index, item) in self.palette.items.iter().enumerate() {
+        for index in self.visible_indices() {
+            let item = &self.palette.items[index];
             if self.palette.grouped
+                && self.filter.trim().is_empty()
                 && let Some(category) = item.category.as_deref()
                 && last_category != Some(category)
             {
@@ -142,11 +152,9 @@ impl App {
 
     fn move_selection(&mut self, delta: isize) {
         let selectable = self
-            .palette
-            .items
-            .iter()
-            .enumerate()
-            .filter_map(|(index, item)| item.selectable.then_some(index))
+            .visible_indices()
+            .into_iter()
+            .filter(|index| self.palette.items[*index].selectable)
             .collect::<Vec<_>>();
         if selectable.is_empty() {
             self.selected = None;
@@ -162,17 +170,12 @@ impl App {
         self.status = None;
     }
 
-    fn select_edge(&mut self, last: bool) {
-        self.selected = if last {
-            self.palette
-                .items
-                .iter()
-                .enumerate()
-                .rev()
-                .find_map(|(index, item)| item.selectable.then_some(index))
-        } else {
-            first_selectable(&self.palette.items)
-        };
+    fn filter_changed(&mut self) {
+        self.selected = self
+            .visible_indices()
+            .into_iter()
+            .find(|index| self.palette.items[*index].selectable);
+        self.scroll = 0;
         self.status = None;
     }
 
@@ -241,30 +244,153 @@ impl App {
         }
     }
 
+    fn insert_character(&mut self, character: char) {
+        let byte_index = byte_index_at_character(&self.filter, self.filter_cursor);
+        self.filter.insert(byte_index, character);
+        self.filter_cursor += 1;
+        self.filter_changed();
+    }
+
+    fn insert_text(&mut self, text: &str) {
+        let text = text
+            .chars()
+            .filter(|character| !character.is_control())
+            .collect::<String>();
+        if text.is_empty() {
+            return;
+        }
+        let byte_index = byte_index_at_character(&self.filter, self.filter_cursor);
+        self.filter.insert_str(byte_index, &text);
+        self.filter_cursor += text.chars().count();
+        self.filter_changed();
+    }
+
+    fn backspace(&mut self) {
+        if self.filter_cursor == 0 {
+            return;
+        }
+        let start = byte_index_at_character(&self.filter, self.filter_cursor - 1);
+        let end = byte_index_at_character(&self.filter, self.filter_cursor);
+        self.filter.replace_range(start..end, "");
+        self.filter_cursor -= 1;
+        self.filter_changed();
+    }
+
+    fn delete(&mut self) {
+        if self.filter_cursor >= self.filter.chars().count() {
+            return;
+        }
+        let start = byte_index_at_character(&self.filter, self.filter_cursor);
+        let end = byte_index_at_character(&self.filter, self.filter_cursor + 1);
+        self.filter.replace_range(start..end, "");
+        self.filter_changed();
+    }
+
+    fn delete_word_back(&mut self) {
+        let start_cursor = word_back(&self.filter, self.filter_cursor);
+        if start_cursor == self.filter_cursor {
+            return;
+        }
+        let start = byte_index_at_character(&self.filter, start_cursor);
+        let end = byte_index_at_character(&self.filter, self.filter_cursor);
+        self.filter.replace_range(start..end, "");
+        self.filter_cursor = start_cursor;
+        self.filter_changed();
+    }
+
+    fn kill_to_start(&mut self) {
+        if self.filter_cursor == 0 {
+            return;
+        }
+        let end = byte_index_at_character(&self.filter, self.filter_cursor);
+        self.filter.replace_range(..end, "");
+        self.filter_cursor = 0;
+        self.filter_changed();
+    }
+
+    fn kill_to_end(&mut self) {
+        let start = byte_index_at_character(&self.filter, self.filter_cursor);
+        if start == self.filter.len() {
+            return;
+        }
+        self.filter.truncate(start);
+        self.filter_changed();
+    }
+
     fn handle_key(&mut self, key: KeyEvent) {
         if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
             return;
         }
 
-        match (key.code, key.modifiers) {
-            (KeyCode::Esc | KeyCode::Char('q'), _) => self.should_quit = true,
-            (KeyCode::Char('c'), modifiers) if modifiers.contains(KeyModifiers::CONTROL) => {
-                self.should_quit = true;
+        let control = key.modifiers.contains(KeyModifiers::CONTROL);
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
+        match key.code {
+            KeyCode::Esc => self.should_quit = true,
+            KeyCode::Char('c' | 'C') if control => self.should_quit = true,
+            KeyCode::Up | KeyCode::Char('p' | 'P') if control => self.move_selection(-1),
+            KeyCode::Down | KeyCode::Char('n' | 'N') if control => self.move_selection(1),
+            KeyCode::Up => self.move_selection(-1),
+            KeyCode::Down => self.move_selection(1),
+            KeyCode::PageUp => self.move_selection(-PAGE_SIZE),
+            KeyCode::PageDown => self.move_selection(PAGE_SIZE),
+            KeyCode::Left if control || alt => {
+                self.filter_cursor = word_back(&self.filter, self.filter_cursor);
             }
-            (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
-                self.move_selection(-1);
+            KeyCode::Right if control || alt => {
+                self.filter_cursor = word_forward(&self.filter, self.filter_cursor);
             }
-            (KeyCode::Down, _) | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
-                self.move_selection(1);
+            KeyCode::Left => self.filter_cursor = self.filter_cursor.saturating_sub(1),
+            KeyCode::Right => {
+                self.filter_cursor = (self.filter_cursor + 1).min(self.filter.chars().count());
             }
-            (KeyCode::PageUp, _) => self.move_selection(-PAGE_SIZE),
-            (KeyCode::PageDown, _) => self.move_selection(PAGE_SIZE),
-            (KeyCode::Home, _) => self.select_edge(false),
-            (KeyCode::End, _) => self.select_edge(true),
-            (KeyCode::Enter, _) => self.activate_selected(),
+            KeyCode::Home => self.filter_cursor = 0,
+            KeyCode::Char('a' | 'A') if control => self.filter_cursor = 0,
+            KeyCode::End => self.filter_cursor = self.filter.chars().count(),
+            KeyCode::Char('e' | 'E') if control => {
+                self.filter_cursor = self.filter.chars().count();
+            }
+            KeyCode::Backspace if control || alt => self.delete_word_back(),
+            KeyCode::Backspace => self.backspace(),
+            KeyCode::Delete => self.delete(),
+            KeyCode::Char('w' | 'W') if control => self.delete_word_back(),
+            KeyCode::Char('u' | 'U') if control => self.kill_to_start(),
+            KeyCode::Char('k' | 'K') if control => self.kill_to_end(),
+            KeyCode::Enter => self.activate_selected(),
+            KeyCode::Char(character) if !control && !alt => self.insert_character(character),
             _ => {}
         }
     }
+}
+
+fn byte_index_at_character(value: &str, character_index: usize) -> usize {
+    value
+        .char_indices()
+        .nth(character_index)
+        .map_or(value.len(), |(byte_index, _)| byte_index)
+}
+
+fn word_back(value: &str, from: usize) -> usize {
+    let characters = value.chars().collect::<Vec<_>>();
+    let mut index = from.min(characters.len());
+    while index > 0 && characters[index - 1].is_whitespace() {
+        index -= 1;
+    }
+    while index > 0 && !characters[index - 1].is_whitespace() {
+        index -= 1;
+    }
+    index
+}
+
+fn word_forward(value: &str, from: usize) -> usize {
+    let characters = value.chars().collect::<Vec<_>>();
+    let mut index = from.min(characters.len());
+    while index < characters.len() && characters[index].is_whitespace() {
+        index += 1;
+    }
+    while index < characters.len() && !characters[index].is_whitespace() {
+        index += 1;
+    }
+    index
 }
 
 pub fn run(invocation: Invocation) -> Result<()> {
@@ -364,7 +490,8 @@ fn run_interactive(invocation: &Invocation) -> Result<()> {
         match event::read().map_err(crate::Error::Terminal)? {
             Event::Key(key) => app.handle_key(key),
             Event::Mouse(_) | Event::Resize(_, _) => {}
-            Event::FocusGained | Event::FocusLost | Event::Paste(_) => {}
+            Event::Paste(text) => app.insert_text(&text),
+            Event::FocusGained | Event::FocusLost => {}
         }
     }
     Ok(())
@@ -381,9 +508,17 @@ fn render(frame: &mut Frame<'_>, app: &mut App) {
     let header = Rect::new(area.x, area.y, area.width, 1);
     render_header(frame, header, &app.palette.title, &styles);
 
-    let footer_height = u16::from(area.height >= 2);
-    let list_y = area.y.saturating_add(1);
-    let list_height = area.height.saturating_sub(1 + footer_height);
+    let search_height = u16::from(area.height >= 2);
+    if search_height == 1 {
+        let search = Rect::new(area.x, area.y.saturating_add(1), area.width, 1);
+        render_search(frame, search, app, &styles);
+    }
+
+    let footer_height = u16::from(area.height >= 3);
+    let list_y = area.y.saturating_add(1 + search_height);
+    let list_height = area
+        .height
+        .saturating_sub(1 + search_height + footer_height);
     let list = Rect::new(area.x, list_y, area.width, list_height);
     render_list(frame, list, app, &styles);
 
@@ -407,6 +542,46 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, title: &str, styles: &ThemeS
         Span::styled(escape, styles.muted),
     ]);
     frame.render_widget(Paragraph::new(line).style(styles.panel), area);
+}
+
+fn render_search(frame: &mut Frame<'_>, area: Rect, app: &App, styles: &ThemeStyles) {
+    if area.is_empty() {
+        return;
+    }
+    let text_width = area.width.saturating_sub(2) as usize;
+    let (visible, cursor_offset) = search_window(&app.filter, app.filter_cursor, text_width);
+    let content = if app.filter.is_empty() {
+        Span::styled(truncate_chars("Search", text_width), styles.muted)
+    } else {
+        Span::styled(visible, styles.panel)
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("▌", styles.accent),
+            Span::styled(" ", styles.panel),
+            content,
+        ]))
+        .style(styles.panel),
+        area,
+    );
+
+    let cursor_x = area
+        .x
+        .saturating_add(2)
+        .saturating_add(u16::try_from(cursor_offset).unwrap_or(u16::MAX))
+        .min(area.right().saturating_sub(1));
+    frame.set_cursor_position((cursor_x, area.y));
+}
+
+fn search_window(value: &str, cursor: usize, width: usize) -> (String, usize) {
+    if width == 0 {
+        return (String::new(), 0);
+    }
+    let characters = value.chars().collect::<Vec<_>>();
+    let cursor = cursor.min(characters.len());
+    let start = cursor.saturating_sub(width.saturating_sub(1));
+    let end = (start + width).min(characters.len());
+    (characters[start..end].iter().collect(), cursor - start)
 }
 
 fn render_list(frame: &mut Frame<'_>, area: Rect, app: &mut App, styles: &ThemeStyles) {
@@ -502,16 +677,19 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App, styles: &ThemeSty
         Some(status) => (status.to_owned(), styles.status),
         None => {
             let count = app
-                .palette
-                .items
-                .iter()
-                .filter(|item| item.selectable)
+                .visible_indices()
+                .into_iter()
+                .filter(|index| app.palette.items[*index].selectable)
                 .count();
-            let noun = if count == 1 { "command" } else { "commands" };
-            (
-                format!("enter select   up/down move   {count} {noun}"),
-                styles.muted,
-            )
+            if count == 0 {
+                (app.palette.empty_text.clone(), styles.muted)
+            } else {
+                let noun = if count == 1 { "command" } else { "commands" };
+                (
+                    format!("enter select   up/down move   {count} {noun}"),
+                    styles.muted,
+                )
+            }
         }
     };
     frame.render_widget(
@@ -564,6 +742,14 @@ mod tests {
         Palette::new("test", "Test", items)
     }
 
+    fn press(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn control(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
     fn temp_file() -> PathBuf {
         let sequence = NEXT_FILE.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!(
@@ -599,7 +785,7 @@ mod tests {
     fn category_measurement_uses_only_matching_commands() {
         let result = measure_palette("commands", Some("System"), None, None);
 
-        assert_eq!(result.rows, 3);
+        assert_eq!(result.rows, 4);
     }
 
     #[test]
@@ -643,7 +829,7 @@ mod tests {
         app.activate_selected();
 
         assert_eq!(app.selected, None);
-        assert_eq!(app.status.as_deref(), Some("No commands"));
+        assert_eq!(app.status.as_deref(), Some("No results"));
         assert!(!app.should_quit);
     }
 
@@ -698,6 +884,71 @@ mod tests {
     }
 
     #[test]
+    fn typing_filters_and_ranks_commands_by_alias() {
+        let mut app = App::new(palettes::load("commands").unwrap(), None);
+
+        app.handle_key(press(KeyCode::Char('n')));
+        app.handle_key(press(KeyCode::Char('s')));
+
+        let visible = app.visible_indices();
+        assert_eq!(app.filter, "ns");
+        assert_eq!(app.filter_cursor, 2);
+        assert_eq!(app.palette.items[visible[0]].title, "New Session");
+        assert_eq!(app.palette.items[visible[1]].title, "Next Session");
+        assert_eq!(app.selected, Some(visible[0]));
+        assert!(app.rows().iter().all(|row| matches!(row, Row::Item(_))));
+    }
+
+    #[test]
+    fn printable_q_filters_instead_of_quitting() {
+        let mut app = App::new(test_palette(vec![test_item("Quit")]), None);
+
+        app.handle_key(press(KeyCode::Char('q')));
+
+        assert_eq!(app.filter, "q");
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn search_edits_are_utf8_safe() {
+        let mut app = App::new(test_palette(vec![test_item("Résumé")]), None);
+        app.insert_text("résumé");
+
+        app.handle_key(press(KeyCode::Left));
+        app.handle_key(press(KeyCode::Backspace));
+        app.handle_key(press(KeyCode::Delete));
+
+        assert_eq!(app.filter, "résu");
+        assert_eq!(app.filter_cursor, 4);
+    }
+
+    #[test]
+    fn word_navigation_and_deletion_use_character_indices() {
+        let mut app = App::new(test_palette(vec![test_item("Split Pane")]), None);
+        app.insert_text("split pane");
+
+        app.handle_key(control(KeyCode::Left));
+        assert_eq!(app.filter_cursor, 6);
+        app.handle_key(control(KeyCode::Char('w')));
+
+        assert_eq!(app.filter, "pane");
+        assert_eq!(app.filter_cursor, 0);
+    }
+
+    #[test]
+    fn no_search_results_clear_selection_and_do_not_activate() {
+        let mut app = App::new(test_palette(vec![test_item("Run")]), None);
+        app.insert_text("zzzz");
+
+        app.activate_selected();
+
+        assert!(app.visible_indices().is_empty());
+        assert_eq!(app.selected, None);
+        assert_eq!(app.status.as_deref(), Some("No results"));
+        assert!(!app.should_quit);
+    }
+
+    #[test]
     fn rendering_shows_commands_and_selection() {
         let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
         let mut app = App::new(
@@ -719,6 +970,37 @@ mod tests {
     }
 
     #[test]
+    fn rendering_shows_the_query_and_omits_categories_while_filtering() {
+        let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+        let mut app = App::new(
+            test_palette(vec![
+                test_item("First").category("Group"),
+                test_item("Second").category("Group"),
+            ]),
+            None,
+        );
+        app.insert_text("fi");
+
+        terminal.draw(|frame| render(frame, &mut app)).unwrap();
+        let text = buffer_text(&terminal);
+        let buffer = terminal.backend().buffer();
+
+        assert!(text.contains("fi"));
+        assert!(text.contains("First"));
+        assert!(!text.contains("Group"));
+        assert!(!text.contains("Second"));
+        assert_eq!(buffer[(2, 1)].symbol(), "f");
+        assert_eq!(buffer[(0, 2)].bg, ratatui::style::Color::Rgb(80, 77, 122));
+    }
+
+    #[test]
+    fn search_window_keeps_a_long_query_cursor_visible() {
+        assert_eq!(search_window("abcdefgh", 8, 4), ("fgh".to_owned(), 3));
+        assert_eq!(search_window("éclair", 2, 4), ("écla".to_owned(), 2));
+        assert_eq!(search_window("anything", 4, 0), (String::new(), 0));
+    }
+
+    #[test]
     fn rendering_applies_the_default_bundled_theme() {
         let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
         let mut app = App::new(
@@ -731,10 +1013,10 @@ mod tests {
 
         assert_eq!(buffer[(0, 0)].bg, ratatui::style::Color::Rgb(45, 43, 85));
         assert_eq!(buffer[(0, 0)].fg, ratatui::style::Color::Rgb(255, 255, 255));
-        assert_eq!(buffer[(2, 1)].fg, ratatui::style::Color::Rgb(250, 208, 0));
-        assert_eq!(buffer[(0, 2)].bg, ratatui::style::Color::Rgb(80, 77, 122));
-        assert_eq!(buffer[(0, 2)].fg, ratatui::style::Color::Rgb(250, 208, 0));
-        assert_eq!(buffer[(5, 2)].fg, ratatui::style::Color::Rgb(255, 255, 255));
+        assert_eq!(buffer[(2, 2)].fg, ratatui::style::Color::Rgb(250, 208, 0));
+        assert_eq!(buffer[(0, 3)].bg, ratatui::style::Color::Rgb(80, 77, 122));
+        assert_eq!(buffer[(0, 3)].fg, ratatui::style::Color::Rgb(250, 208, 0));
+        assert_eq!(buffer[(5, 3)].fg, ratatui::style::Color::Rgb(255, 255, 255));
     }
 
     #[test]
