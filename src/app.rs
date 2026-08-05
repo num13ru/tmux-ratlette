@@ -21,13 +21,11 @@ use crate::model::{
     Action, FindPaneRow, Item, ItemData, Palette, PaletteFilter, Theme, ThemeColor,
 };
 use crate::terminal::TerminalSession;
+use crate::user_config::{EscapeBehavior, NavigationConfig, RuntimeConfig, SizingConfig};
 use crate::{Result, palettes, themes};
 
-const DEFAULT_WIDTH: u16 = 90;
-const DEFAULT_MAX_HEIGHT: u16 = 28;
 const DEFAULT_EMPTY_HEIGHT: u16 = 7;
 const DEFAULT_PAD_X: u16 = 3;
-const DEFAULT_MOBILE_WIDTH: u16 = 80;
 const UNBORDERED_CHROME_ROWS: u16 = 7;
 const BORDERED_CHROME_ROWS: u16 = 5;
 const PAGE_SIZE: isize = 10;
@@ -89,7 +87,7 @@ pub struct Measurement {
     pub rows: u16,
     pub width: u16,
     pub pad_x: u16,
-    pub border: &'static str,
+    pub border: String,
     pub body_style: String,
     pub border_style: String,
 }
@@ -126,18 +124,19 @@ impl Default for LayoutOptions {
 }
 
 impl LayoutOptions {
-    fn from_env() -> Self {
+    fn from_env(default_pad_x: u16) -> Self {
         Self::from_values(
             std::env::var_os("TMUX_PALETTE_PADX").as_deref(),
             std::env::var_os("TMUX_PALETTE_BORDERED").as_deref(),
+            default_pad_x,
         )
     }
 
-    fn from_values(pad_x: Option<&OsStr>, bordered: Option<&OsStr>) -> Self {
+    fn from_values(pad_x: Option<&OsStr>, bordered: Option<&OsStr>, default_pad_x: u16) -> Self {
         let pad_x = pad_x
             .and_then(OsStr::to_str)
             .and_then(|value| value.parse::<u16>().ok())
-            .unwrap_or(DEFAULT_PAD_X);
+            .unwrap_or(default_pad_x);
         Self {
             pad_x,
             bordered: bordered == Some(OsStr::new("1")),
@@ -164,6 +163,8 @@ struct App {
     status: Option<String>,
     dispatch_path: Option<PathBuf>,
     config_dir: Option<PathBuf>,
+    navigation: NavigationConfig,
+    escape: EscapeBehavior,
     stack: Vec<NavState>,
     should_quit: bool,
 }
@@ -199,6 +200,23 @@ impl App {
         layout: LayoutOptions,
         config_dir: Option<PathBuf>,
     ) -> Self {
+        Self::new_with_runtime(
+            palette,
+            dispatch_path,
+            layout,
+            config_dir,
+            RuntimeConfig::default(),
+        )
+    }
+
+    fn new_with_runtime(
+        mut palette: Palette,
+        dispatch_path: Option<PathBuf>,
+        layout: LayoutOptions,
+        config_dir: Option<PathBuf>,
+        runtime: RuntimeConfig,
+    ) -> Self {
+        palette.warnings.extend(runtime.warnings);
         let selected = palette
             .initial_selected
             .filter(|index| {
@@ -219,6 +237,8 @@ impl App {
             status,
             dispatch_path,
             config_dir,
+            navigation: runtime.navigation,
+            escape: runtime.sizing.escape,
             stack: Vec::new(),
             should_quit: false,
         };
@@ -287,7 +307,7 @@ impl App {
     }
 
     fn escape_or_back(&mut self) {
-        if !self.navigate_back(None) {
+        if self.escape == EscapeBehavior::Exit || !self.navigate_back(None) {
             self.should_quit = true;
         }
     }
@@ -351,7 +371,12 @@ impl App {
             .selected
             .and_then(|selected| selectable.iter().position(|index| *index == selected))
             .unwrap_or(0) as isize;
-        let next = (current + delta).rem_euclid(selectable.len() as isize) as usize;
+        let candidate = current.saturating_add(delta);
+        let next = if self.navigation.wrap_at_list_ends {
+            candidate.rem_euclid(selectable.len() as isize) as usize
+        } else {
+            candidate.clamp(0, selectable.len().saturating_sub(1) as isize) as usize
+        };
         self.selected = Some(selectable[next]);
         self.status = None;
         self.preview_selected_theme();
@@ -596,6 +621,18 @@ impl App {
         match key.code {
             KeyCode::Esc => self.escape_or_back(),
             KeyCode::Char('c' | 'C') if control => self.should_quit = true,
+            KeyCode::Char('k' | 'K') if control && self.navigation.vim_keys => {
+                self.move_selection(-1);
+            }
+            KeyCode::Char('j' | 'J') if control && self.navigation.vim_keys => {
+                self.move_selection(1);
+            }
+            KeyCode::Char('u' | 'U') if control && self.navigation.vim_keys => {
+                self.move_selection(-PAGE_SIZE);
+            }
+            KeyCode::Char('d' | 'D') if control && self.navigation.vim_keys => {
+                self.move_selection(PAGE_SIZE);
+            }
             KeyCode::Up | KeyCode::Char('p' | 'P') if control => self.move_selection(-1),
             KeyCode::Down | KeyCode::Char('n' | 'N') if control => self.move_selection(1),
             KeyCode::Up => self.move_selection(-1),
@@ -664,6 +701,7 @@ fn word_forward(value: &str, from: usize) -> usize {
 
 pub fn run(invocation: Invocation) -> Result<()> {
     let config_dir = resolve_config_dir(invocation.config_dir.as_deref())?;
+    let runtime = crate::user_config::runtime(&config_dir);
 
     match invocation.mode {
         Mode::Measure => {
@@ -675,16 +713,24 @@ pub fn run(invocation: Invocation) -> Result<()> {
                     invocation.client_width,
                     invocation.client_height,
                     Some(&config_dir),
+                    &runtime.sizing,
                 )
             );
             Ok(())
         }
-        Mode::Interactive => run_interactive(&invocation, config_dir),
+        Mode::Interactive => run_interactive(&invocation, config_dir, runtime),
     }
 }
 
 pub fn measure(client_width: Option<NonZeroU16>, client_height: Option<NonZeroU16>) -> Measurement {
-    measure_palette("commands", None, client_width, client_height, None)
+    measure_palette(
+        "commands",
+        None,
+        client_width,
+        client_height,
+        None,
+        &SizingConfig::default(),
+    )
 }
 
 fn measure_palette(
@@ -693,26 +739,37 @@ fn measure_palette(
     client_width: Option<NonZeroU16>,
     client_height: Option<NonZeroU16>,
     config_dir: Option<&std::path::Path>,
+    sizing: &SizingConfig,
 ) -> Measurement {
     let (rows, theme) = palettes::load(palette_name, config_dir)
         .map(|mut palette| {
             if let Some(category) = category {
                 palette.filter_category(category);
             }
-            (desired_height(&palette), palette.theme)
+            (desired_height(&palette, sizing.max_height), palette.theme)
         })
-        .unwrap_or((DEFAULT_EMPTY_HEIGHT, themes::default_theme()));
+        .unwrap_or((
+            DEFAULT_EMPTY_HEIGHT.min(sizing.max_height),
+            themes::default_theme(),
+        ));
     let mut measurement = Measurement {
         rows,
-        width: DEFAULT_WIDTH,
-        pad_x: DEFAULT_PAD_X,
-        border: "none",
-        body_style: theme.tmux_body_style(),
-        border_style: theme.tmux_border_style(),
+        width: sizing.width,
+        pad_x: sizing.pad_x,
+        border: sizing.border.clone(),
+        body_style: sizing
+            .body_style
+            .clone()
+            .unwrap_or_else(|| theme.tmux_body_style()),
+        border_style: sizing
+            .border_style
+            .clone()
+            .unwrap_or_else(|| theme.tmux_border_style()),
     };
 
     if let Some(width) = client_width.map(NonZeroU16::get)
-        && width < DEFAULT_MOBILE_WIDTH
+        && sizing.mobile_width > 0
+        && width < sizing.mobile_width
     {
         measurement.width = width;
         measurement.pad_x = 1;
@@ -724,7 +781,7 @@ fn measure_palette(
     measurement
 }
 
-fn desired_height(palette: &Palette) -> u16 {
+fn desired_height(palette: &Palette, max_height: u16) -> u16 {
     let categories = if palette.grouped {
         palette
             .items
@@ -739,20 +796,40 @@ fn desired_height(palette: &Palette) -> u16 {
     u16::try_from(content_rows)
         .unwrap_or(u16::MAX)
         .saturating_add(UNBORDERED_CHROME_ROWS)
-        .clamp(DEFAULT_EMPTY_HEIGHT, DEFAULT_MAX_HEIGHT)
+        .max(DEFAULT_EMPTY_HEIGHT)
+        .min(max_height)
 }
 
-fn run_interactive(invocation: &Invocation, config_dir: PathBuf) -> Result<()> {
+fn run_interactive(
+    invocation: &Invocation,
+    config_dir: PathBuf,
+    runtime: RuntimeConfig,
+) -> Result<()> {
     let dispatch_path = std::env::var_os("TMUX_PALETTE_CMD").map(PathBuf::from);
-    let layout = LayoutOptions::from_env();
+    let layout = LayoutOptions::from_env(runtime.sizing.pad_x);
     let mut app = match palettes::load(&invocation.palette, Some(&config_dir)) {
         Some(mut palette) => {
             if let Some(category) = invocation.category.as_deref() {
                 palette.filter_category(category);
             }
-            App::new_with_context(palette, dispatch_path, layout, Some(config_dir.clone()))
+            App::new_with_runtime(
+                palette,
+                dispatch_path,
+                layout,
+                Some(config_dir.clone()),
+                runtime,
+            )
         }
-        None => App::unsupported(&invocation.palette, dispatch_path, layout, Some(config_dir)),
+        None => {
+            let mut app =
+                App::unsupported(&invocation.palette, dispatch_path, layout, Some(config_dir));
+            app.navigation = runtime.navigation;
+            app.escape = runtime.sizing.escape;
+            if app.status.is_none() {
+                app.status = runtime.warnings.first().cloned();
+            }
+            app
+        }
     };
     let mut terminal = TerminalSession::enter(!invocation.no_mouse)?;
 
@@ -1344,7 +1421,14 @@ mod tests {
 
     #[test]
     fn category_measurement_uses_only_matching_commands() {
-        let result = measure_palette("commands", Some("System"), None, None, None);
+        let result = measure_palette(
+            "commands",
+            Some("System"),
+            None,
+            None,
+            None,
+            &SizingConfig::default(),
+        );
 
         assert_eq!(result.rows, 8);
     }
@@ -1352,7 +1436,7 @@ mod tests {
     #[test]
     fn empty_palette_measurement_uses_only_the_seven_chrome_rows() {
         assert_eq!(
-            desired_height(&test_palette(Vec::new())),
+            desired_height(&test_palette(Vec::new()), 28),
             DEFAULT_EMPTY_HEIGHT
         );
     }
@@ -1367,6 +1451,36 @@ mod tests {
     }
 
     #[test]
+    fn configured_sizing_controls_measurement_and_can_disable_mobile_mode() {
+        let sizing = SizingConfig {
+            width: 72,
+            max_height: 12,
+            pad_x: 2,
+            mobile_width: 0,
+            border: "rounded".to_owned(),
+            body_style: Some("bg=#010203".to_owned()),
+            border_style: Some("fg=blue".to_owned()),
+            ..SizingConfig::default()
+        };
+
+        let result = measure_palette(
+            "commands",
+            None,
+            NonZeroU16::new(60),
+            NonZeroU16::new(30),
+            None,
+            &sizing,
+        );
+
+        assert_eq!(result.rows, 12);
+        assert_eq!(result.width, 72);
+        assert_eq!(result.pad_x, 2);
+        assert_eq!(result.border, "rounded");
+        assert_eq!(result.body_style, "bg=#010203");
+        assert_eq!(result.border_style, "fg=blue");
+    }
+
+    #[test]
     fn short_mobile_clients_still_fit_the_palette_chrome() {
         let result = measure_palette(
             "missing",
@@ -1374,6 +1488,7 @@ mod tests {
             NonZeroU16::new(60),
             NonZeroU16::new(2),
             None,
+            &SizingConfig::default(),
         );
 
         assert_eq!(result.rows, DEFAULT_EMPTY_HEIGHT);
@@ -1382,14 +1497,14 @@ mod tests {
     #[test]
     fn layout_options_validate_environment_values() {
         assert_eq!(
-            LayoutOptions::from_values(Some(OsStr::new("5")), Some(OsStr::new("1"))),
+            LayoutOptions::from_values(Some(OsStr::new("5")), Some(OsStr::new("1")), 3),
             LayoutOptions {
                 pad_x: 5,
                 bordered: true,
             }
         );
         assert_eq!(
-            LayoutOptions::from_values(Some(OsStr::new("-1")), Some(OsStr::new("true"))),
+            LayoutOptions::from_values(Some(OsStr::new("-1")), Some(OsStr::new("true")), 3),
             LayoutOptions::default()
         );
 
@@ -1412,6 +1527,72 @@ mod tests {
         assert_eq!(app.selected, Some(0));
         app.move_selection(-1);
         assert_eq!(app.selected, Some(2));
+    }
+
+    #[test]
+    fn navigation_config_clamps_and_enables_vim_control_keys() {
+        let runtime = RuntimeConfig {
+            navigation: NavigationConfig {
+                wrap_at_list_ends: false,
+                vim_keys: true,
+            },
+            ..RuntimeConfig::default()
+        };
+        let mut app = App::new_with_runtime(
+            test_palette(vec![
+                test_item("First"),
+                test_item("Middle"),
+                test_item("Final"),
+            ]),
+            None,
+            LayoutOptions::default(),
+            None,
+            runtime,
+        );
+
+        app.move_selection(-1);
+        assert_eq!(app.selected, Some(0));
+        app.handle_key(control(KeyCode::Char('d')));
+        assert_eq!(app.selected, Some(2));
+        app.handle_key(control(KeyCode::Char('j')));
+        assert_eq!(app.selected, Some(2));
+        app.filter = "i".to_owned();
+        app.filter_cursor = 1;
+        app.handle_key(control(KeyCode::Char('u')));
+        assert_eq!(app.selected, Some(0));
+        assert_eq!(app.filter, "i");
+        app.handle_key(control(KeyCode::Char('k')));
+        assert_eq!(app.selected, Some(0));
+    }
+
+    #[test]
+    fn sizing_escape_exit_closes_instead_of_popping_navigation_stack() {
+        let sizing = SizingConfig {
+            escape: EscapeBehavior::Exit,
+            ..SizingConfig::default()
+        };
+        let runtime = RuntimeConfig {
+            sizing,
+            ..RuntimeConfig::default()
+        };
+        let mut app = App::new_with_runtime(
+            test_palette(vec![test_item("Root")]),
+            None,
+            LayoutOptions::default(),
+            None,
+            runtime,
+        );
+        app.navigate_to(Palette::new(
+            "nested",
+            "Nested",
+            vec![test_item("Nested item")],
+        ));
+
+        app.handle_key(press(KeyCode::Esc));
+
+        assert!(app.should_quit);
+        assert_eq!(app.palette.name, "nested");
+        assert_eq!(app.stack.len(), 1);
     }
 
     #[test]

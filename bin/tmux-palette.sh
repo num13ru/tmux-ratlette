@@ -95,7 +95,7 @@ fi
 # Ask the palette how big it wants to be. The Rust executable emits tab-separated
 # rows<TAB>width<TAB>padX<TAB>border<TAB>bodyStyle<TAB>borderStyle,
 # with bootstrap defaults applied. Passing client dimensions enables its
-# narrow-terminal mode. Configuration-based sizing is not ported yet.
+# narrow-terminal mode. Values from sizing.json are included in this response.
 MEASURE="$("$BINARY" "${RUST_ARGS[@]}" --measure "--cw=$CW" "--ch=$CH" 2>/dev/null || echo "20	90	3	none	default	default")"
 IFS=$'\t' read -r WANT_H WANT_W WANT_PADX WANT_BORDER WANT_BODY_STYLE WANT_BORDER_STYLE <<< "$MEASURE"
 [[ "$WANT_H" =~ ^[1-9][0-9]*$ ]] || WANT_H=20

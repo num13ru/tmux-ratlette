@@ -153,9 +153,31 @@ pub fn list(config_dir: Option<&Path>) -> Vec<ThemeEntry> {
 }
 
 pub fn active_theme(config_dir: Option<&Path>) -> Theme {
-    config_dir
-        .and_then(|directory| read_active_theme(directory).ok())
-        .unwrap_or_else(default_theme)
+    active_theme_with_warning(config_dir).0
+}
+
+pub(crate) fn active_theme_with_warning(config_dir: Option<&Path>) -> (Theme, Option<String>) {
+    let Some(directory) = config_dir else {
+        return (default_theme(), None);
+    };
+    let path = directory.join("theme.json");
+    match path.try_exists() {
+        Ok(false) => return (default_theme(), None),
+        Err(error) => {
+            return (
+                default_theme(),
+                Some(format!(
+                    "Config warning: could not inspect {}: {error}",
+                    path.display()
+                )),
+            );
+        }
+        Ok(true) => {}
+    }
+    match read_active_theme(directory) {
+        Ok(theme) => (theme, None),
+        Err(error) => (default_theme(), Some(format!("Config warning: {error}"))),
+    }
 }
 
 pub fn save_active_theme(config_dir: &Path, slug: &str) -> Result<(), String> {
@@ -409,6 +431,9 @@ mod tests {
         fs::write(directory.join("theme.json"), r#"{"accent":"nope"}"#).unwrap();
 
         assert_eq!(active_theme(Some(&directory)), default_theme());
+        let (theme, warning) = active_theme_with_warning(Some(&directory));
+        assert_eq!(theme, default_theme());
+        assert!(warning.unwrap().contains("theme.json"));
         fs::remove_dir_all(directory).unwrap();
     }
 
