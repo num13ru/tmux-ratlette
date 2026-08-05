@@ -413,11 +413,14 @@ impl RawCustomPalette {
         if let Some(empty_text) = self.empty_text {
             palette.empty_text = empty_text;
         }
-        if self.command.is_some() {
-            palette.warnings.push(format!(
-                "Config warning in {}: shell-generated palette commands have not been ported to Rust yet",
-                config_dir.join("palettes").join(format!("{name}.json")).display()
-            ));
+        if let Some(command) = self.command.filter(|command| !command.is_empty()) {
+            match crate::plugin_source::run(&command) {
+                Ok(output) => palette.source_output = Some(output),
+                Err(error) => palette.warnings.push(warning(
+                    &config_dir.join("palettes").join(format!("{name}.json")),
+                    error,
+                )),
+            }
         }
         Ok(palette)
     }
@@ -676,7 +679,7 @@ mod tests {
         fs::write(directory.join("aliases.json"), r#"{"Inline":["in"]}"#).unwrap();
         fs::write(
             directory.join("palettes/favorites.json"),
-            r#"{"title":"Favorites","from":["Hidden","Custom"],"fromCategory":"Tools","items":[{"title":"Inline","action":{"tmux":"display-message inline"}}],"grouped":true,"emptyText":"Nothing here","command":"ignored for now","future":true}"#,
+            r#"{"title":"Favorites","from":["Hidden","Custom"],"fromCategory":"Tools","items":[{"title":"Inline","action":{"tmux":"display-message inline"}}],"grouped":true,"emptyText":"Nothing here","command":"printf dynamic","future":true}"#,
         )
         .unwrap();
         let base = base_palette();
@@ -696,8 +699,11 @@ mod tests {
             ["Hidden", "Custom", "Custom", "Inline"]
         );
         assert_eq!(palette.items[3].aliases, ["in"]);
-        assert_eq!(palette.warnings.len(), 1);
-        assert!(palette.warnings[0].contains("shell-generated"));
+        assert_eq!(
+            palette.source_output.as_deref(),
+            Some(b"dynamic".as_slice())
+        );
+        assert!(palette.warnings.is_empty());
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -715,6 +721,28 @@ mod tests {
         assert!(malformed.warnings[0].contains("palettes/broken.json"));
         assert!(unsafe_name.items.is_empty());
         assert!(unsafe_name.warnings[0].contains("unsafe palette name"));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn custom_palette_command_failures_warn_without_dropping_static_items() {
+        let directory = temp_directory();
+        fs::create_dir(directory.join("palettes")).unwrap();
+        fs::write(
+            directory.join("palettes/failing.json"),
+            r#"{"command":"printf failed-source >&2; exit 9","items":[{"title":"Still here","action":{"shell":":"}}]}"#,
+        )
+        .unwrap();
+        let base = base_palette();
+
+        let palette = custom_palette("failing", Some(&directory), &base.items).unwrap();
+
+        assert_eq!(palette.items.len(), 1);
+        assert_eq!(palette.items[0].title, "Still here");
+        assert!(palette.source_output.is_none());
+        assert_eq!(palette.warnings.len(), 1);
+        assert!(palette.warnings[0].contains("palettes/failing.json"));
+        assert!(palette.warnings[0].contains("exit 9: failed-source"));
         fs::remove_dir_all(directory).unwrap();
     }
 }
