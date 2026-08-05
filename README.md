@@ -8,9 +8,10 @@ dependencies, and opens quickly enough to use as a regular tmux binding.
 > the behavior reference while features are ported and verified. Contributors
 > can build the experimental binary with `cargo build` and run it as
 > `target/debug/tmux-ratlette`; it currently provides CLI parsing, popup
-> measurement, terminal setup, the built-in Commands palette, and the dynamic
-> Find Pane tree with current-pane selection. Both palettes support keyboard
-> navigation, scrolling, and tmux command dispatch. Fuzzy search supports
+> measurement, terminal setup, the built-in Commands palette, the dynamic Find
+> Pane tree with current-pane selection, and Move Pane destinations. All three
+> palettes support keyboard navigation, scrolling, and tmux command dispatch.
+> Fuzzy search supports
 > initials, aliases, and multi-word queries;
 > the padded layout also renders descriptions, alias chips, shortcuts, and
 > empty states in parity with the Bun palette, including Unicode-aware terminal

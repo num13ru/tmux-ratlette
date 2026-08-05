@@ -1,9 +1,8 @@
 use std::collections::HashSet;
-use std::ffi::OsString;
-use std::process::Command;
 
 use crate::fuzzy::multi_fuzzy_score;
 use crate::model::{Action, FindPaneRow, Item, ItemData, Palette, PaletteFilter};
+use crate::tmux;
 
 const FIELD_SEPARATOR: char = '\u{1f}';
 const PANE_FORMAT: &str = "#{session_name}\u{1f}#{window_index}\u{1f}#{pane_index}\u{1f}#{window_name}\u{1f}#{pane_title}\u{1f}#{pane_current_command}\u{1f}#{pane_current_path}\u{1f}#{pane_active}\u{1f}#{window_active}";
@@ -113,48 +112,12 @@ pub fn filter_indices(items: &[Item], query: &str) -> Vec<usize> {
 }
 
 fn discover_panes() -> Result<(String, String), String> {
-    let mut current_arguments = vec![OsString::from("display-message"), OsString::from("-p")];
-    if let Some(pane_id) = std::env::var_os("TMUX_PANE").filter(|value| !value.is_empty()) {
-        current_arguments.push(OsString::from("-t"));
-        current_arguments.push(pane_id);
-    }
-    current_arguments.push(OsString::from(
-        "#{session_name}:#{window_index}.#{pane_index}",
-    ));
-    let current_pane = run_tmux(&current_arguments)?;
+    let current_pane = tmux::display_current("#{session_name}:#{window_index}.#{pane_index}")?;
     if current_pane.is_empty() {
         return Err("tmux did not report the current pane".to_owned());
     }
-    let panes = run_tmux(&[
-        OsString::from("list-panes"),
-        OsString::from("-a"),
-        OsString::from("-F"),
-        OsString::from(PANE_FORMAT),
-    ])?;
+    let panes = tmux::run(&["list-panes", "-a", "-F", PANE_FORMAT])?;
     Ok((current_pane, panes))
-}
-
-fn run_tmux(arguments: &[OsString]) -> Result<String, String> {
-    let executable = std::env::var_os("TMUX_BIN").unwrap_or_else(|| OsString::from("tmux"));
-    let output = Command::new(&executable)
-        .args(arguments)
-        .output()
-        .map_err(|error| format!("could not run {}: {error}", executable.to_string_lossy()))?;
-    if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-        return Err(if detail.is_empty() {
-            format!(
-                "tmux {} failed with {}",
-                arguments[0].to_string_lossy(),
-                output.status
-            )
-        } else {
-            format!("tmux {} failed: {detail}", arguments[0].to_string_lossy())
-        });
-    }
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .trim_end()
-        .to_owned())
 }
 
 fn palette_from_output(current_pane: &str, output: &str) -> Result<Palette, String> {
@@ -184,7 +147,7 @@ fn palette_from_output(current_pane: &str, output: &str) -> Result<Palette, Stri
             .or_else(|| all_panes.first().copied());
         let mut session_item = Item::new(
             &session.name,
-            Action::tmux(format!("switch-client -t {}", tmux_quote(&session.name))),
+            Action::tmux(format!("switch-client -t {}", tmux::quote(&session.name))),
         );
         session_item.selectable = false;
         session_item.data = ItemData::FindPane(Box::new(FindPaneRow::Session {
@@ -210,8 +173,8 @@ fn palette_from_output(current_pane: &str, output: &str) -> Result<Palette, Stri
                 &window.name,
                 Action::tmux(format!(
                     "select-window -t {} \\; switch-client -t {}",
-                    tmux_quote(&format!("{}:{}", session.name, window.index)),
-                    tmux_quote(&session.name)
+                    tmux::quote(&format!("{}:{}", session.name, window.index)),
+                    tmux::quote(&session.name)
                 )),
             );
             window_item.selectable = false;
@@ -342,9 +305,9 @@ fn pane_item(pane: Pane, tree_prefix: String) -> Item {
         &pane.pane_title,
         Action::tmux(format!(
             "select-pane -t {} \\; select-window -t {} \\; switch-client -t {}",
-            tmux_quote(&pane.target),
-            tmux_quote(&window_target),
-            tmux_quote(&pane.session)
+            tmux::quote(&pane.target),
+            tmux::quote(&window_target),
+            tmux::quote(&pane.session)
         )),
     );
     item.data = ItemData::FindPane(Box::new(FindPaneRow::Pane {
@@ -383,10 +346,6 @@ fn detect_agent<'a>(command: &'a str, title: &'a str) -> &'a str {
         return "claude";
     }
     ""
-}
-
-fn tmux_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 #[cfg(test)]
@@ -514,11 +473,6 @@ mod tests {
             palette.empty_text,
             "Could not load panes: tmux list-panes failed: no server"
         );
-    }
-
-    #[test]
-    fn quotes_tmux_targets_containing_single_quotes() {
-        assert_eq!(tmux_quote("a'b"), "'a'\\''b'");
     }
 
     #[test]

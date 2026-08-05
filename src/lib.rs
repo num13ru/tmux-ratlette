@@ -8,5 +8,6 @@ pub mod model;
 pub mod palettes;
 pub mod terminal;
 pub mod themes;
+pub(crate) mod tmux;
 
 pub use error::{Error, Result};

@@ -1437,8 +1437,8 @@ visible after filtering/resizing, and the popup remains usable with zero results
 ### Remaining port phases
 
 - [x] Port `find-pane` and its initial current-pane selection.
-- [ ] Port `move-pane`. **Next.**
-- [ ] Port bundled and user themes with live preview and atomic persistence.
+- [x] Port `move-pane`.
+- [ ] Port bundled and user themes with live preview and atomic persistence. **Next.**
 - [ ] Add the nested palette navigation stack and Escape/back behavior.
 - [ ] Load `commands.json`, `hidden.json`, `aliases.json`, and `shortcuts.json`.
 - [ ] Load navigation, sizing, theme, and custom palette configuration.
