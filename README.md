@@ -8,9 +8,10 @@ dependencies, and opens quickly enough to use as a regular tmux binding.
 > the behavior reference while features are ported and verified. Contributors
 > can build the experimental binary with `cargo build` and run it as
 > `target/debug/tmux-ratlette`; it currently provides CLI parsing, popup
-> measurement, terminal setup, and a static built-in Commands palette with
-> the default bundled theme, keyboard navigation, scrolling, and tmux command
-> dispatch. Fuzzy search supports initials, aliases, and multi-word queries;
+> measurement, terminal setup, the built-in Commands palette, and the dynamic
+> Find Pane tree with current-pane selection. Both palettes support keyboard
+> navigation, scrolling, and tmux command dispatch. Fuzzy search supports
+> initials, aliases, and multi-word queries;
 > the padded layout also renders descriptions, alias chips, shortcuts, and
 > empty states in parity with the Bun palette, including Unicode-aware terminal
 > widths for truncation, alignment, and search cursor placement. Mouse wheel,
@@ -18,7 +19,8 @@ dependencies, and opens quickly enough to use as a regular tmux binding.
 > clients use the edge-to-edge mobile layout; when the wrapper marks a popup as
 > bordered, the renderer replaces its outer padding rows without shifting
 > content or mouse targets.
-> User configuration and the dynamic built-in palettes have not been ported yet.
+> User configuration and the remaining dynamic built-in palettes have not been
+> ported yet.
 > The existing `bin/tmux-palette.sh` development wrapper now launches this
 > binary. Re-run `cargo build` after Rust source changes; tmux does not compile
 > the checkout automatically. Set `@palette-binary` or `TMUX_PALETTE_BIN` to

@@ -1,5 +1,11 @@
 use super::{Item, Theme};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaletteFilter {
+    Default,
+    FindPaneTree,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Palette {
     pub name: String,
@@ -8,6 +14,8 @@ pub struct Palette {
     pub empty_text: String,
     pub theme: Theme,
     pub items: Vec<Item>,
+    pub filter: PaletteFilter,
+    pub initial_selected: Option<usize>,
 }
 
 impl Palette {
@@ -19,6 +27,8 @@ impl Palette {
             empty_text: "No results".to_owned(),
             theme: crate::themes::default_theme(),
             items,
+            filter: PaletteFilter::Default,
+            initial_selected: None,
         }
     }
 

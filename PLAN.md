@@ -1383,7 +1383,7 @@ Possibly direct tmux popup management from Rust
 
 ## 27. Rust Port Progress
 
-Last reviewed: 2026-08-04.
+Last reviewed: 2026-08-05.
 
 Check an item only after its automated tests pass. Check phase-level acceptance
 items only after the relevant behavior has also been exercised in a real tmux
@@ -1436,8 +1436,8 @@ visible after filtering/resizing, and the popup remains usable with zero results
 
 ### Remaining port phases
 
-- [ ] Port `find-pane` and its initial current-pane selection. **Next.**
-- [ ] Port `move-pane`.
+- [x] Port `find-pane` and its initial current-pane selection.
+- [ ] Port `move-pane`. **Next.**
 - [ ] Port bundled and user themes with live preview and atomic persistence.
 - [ ] Add the nested palette navigation stack and Escape/back behavior.
 - [ ] Load `commands.json`, `hidden.json`, `aliases.json`, and `shortcuts.json`.

@@ -9,7 +9,7 @@ use crossterm::event::{
 };
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 use unicode_width::UnicodeWidthStr;
@@ -17,7 +17,9 @@ use unicode_width::UnicodeWidthStr;
 use crate::cli::{Invocation, Mode};
 use crate::config::resolve_config_dir;
 use crate::dispatch;
-use crate::model::{Action, Item, Palette, Theme, ThemeColor};
+use crate::model::{
+    Action, FindPaneRow, Item, ItemData, Palette, PaletteFilter, Theme, ThemeColor,
+};
 use crate::terminal::TerminalSession;
 use crate::{Result, palettes, themes};
 
@@ -44,6 +46,8 @@ struct ThemeStyles {
     selected_muted: Style,
     status: Style,
     alias: Style,
+    pane_active: Style,
+    selected_pane_active: Style,
 }
 
 impl ThemeStyles {
@@ -64,6 +68,12 @@ impl ThemeStyles {
             selected_muted: themed_style(theme.muted, theme.selected),
             status: themed_style(theme.accent, theme.panel),
             alias: themed_style(theme.fg, theme.bg),
+            pane_active: Style::new()
+                .fg(Color::Rgb(166, 227, 161))
+                .bg(theme.panel.ratatui()),
+            selected_pane_active: Style::new()
+                .fg(Color::Rgb(166, 227, 161))
+                .bg(theme.selected.ratatui()),
         }
     }
 }
@@ -167,7 +177,15 @@ impl App {
         dispatch_path: Option<PathBuf>,
         layout: LayoutOptions,
     ) -> Self {
-        let selected = first_selectable(&palette.items);
+        let selected = palette
+            .initial_selected
+            .filter(|index| {
+                palette
+                    .items
+                    .get(*index)
+                    .is_some_and(|item| item.selectable)
+            })
+            .or_else(|| first_selectable(&palette.items));
         Self {
             palette,
             selected,
@@ -191,8 +209,32 @@ impl App {
         app
     }
 
+    fn replace_palette(&mut self, palette: Palette) {
+        self.selected = palette
+            .initial_selected
+            .filter(|index| {
+                palette
+                    .items
+                    .get(*index)
+                    .is_some_and(|item| item.selectable)
+            })
+            .or_else(|| first_selectable(&palette.items));
+        self.palette = palette;
+        self.scroll = 0;
+        self.filter.clear();
+        self.filter_cursor = 0;
+        self.status = None;
+    }
+
     fn visible_indices(&self) -> Vec<usize> {
-        crate::fuzzy::default_filter(&self.palette.items, &self.filter)
+        match self.palette.filter {
+            PaletteFilter::Default => {
+                crate::fuzzy::default_filter(&self.palette.items, &self.filter)
+            }
+            PaletteFilter::FindPaneTree => {
+                palettes::find_pane::filter_indices(&self.palette.items, &self.filter)
+            }
+        }
     }
 
     fn rows(&self) -> Vec<Row> {
@@ -294,10 +336,14 @@ impl App {
                 }
             }
             Action::Palette(name) => {
-                self.status = Some(format!(
-                    "The {} palette has not been ported to Rust yet",
-                    display_palette_name(&name)
-                ));
+                if let Some(palette) = palettes::load(&name) {
+                    self.replace_palette(palette);
+                } else {
+                    self.status = Some(format!(
+                        "The {} palette has not been ported to Rust yet",
+                        display_palette_name(&name)
+                    ));
+                }
             }
             Action::Popup(_) => {
                 self.status = Some("Popup actions have not been ported to Rust yet".to_owned());
@@ -816,6 +862,11 @@ fn render_item(
     layout: LayoutOptions,
     styles: &ThemeStyles,
 ) {
+    if let ItemData::FindPane(row) = &item.data {
+        render_find_pane_item(frame, area, item, row, selected, layout, styles);
+        return;
+    }
+
     let style = if selected {
         styles.selected
     } else {
@@ -884,6 +935,149 @@ fn render_item(
             shortcut_area,
         );
     }
+}
+
+fn render_find_pane_item(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    item: &Item,
+    row: &FindPaneRow,
+    selected: bool,
+    layout: LayoutOptions,
+    styles: &ThemeStyles,
+) {
+    let row_style = if selected {
+        styles.selected
+    } else {
+        styles.panel
+    };
+    frame.render_widget(Block::default().style(row_style), area);
+    let content = content_rect(area, layout.pad_x);
+    if content.is_empty() {
+        return;
+    }
+
+    match row {
+        FindPaneRow::Session {
+            count,
+            path,
+            is_current,
+            ..
+        } => {
+            let marker = if *is_current { "▶ " } else { "  " };
+            let marker_style = if *is_current {
+                styles.accent
+            } else {
+                row_style
+            };
+            let path = shorten_home(path);
+            let mut spans = vec![
+                Span::styled(marker, marker_style),
+                Span::styled(
+                    item.title.as_str(),
+                    styles.accent.add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(format!(" ({count})"), styles.muted),
+            ];
+            if !path.is_empty() {
+                spans.push(Span::styled(format!("  {path}"), styles.muted));
+            }
+            frame.render_widget(Paragraph::new(Line::from(spans)).style(row_style), content);
+        }
+        FindPaneRow::Window { tree_prefix, .. } => {
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(tree_prefix.as_str(), styles.muted),
+                    Span::styled(item.title.as_str(), styles.panel),
+                ]))
+                .style(row_style),
+                content,
+            );
+        }
+        FindPaneRow::Pane {
+            window_index,
+            pane_index,
+            tree_prefix,
+            agent,
+            pane_active,
+            is_current,
+            ..
+        } => {
+            let muted_style = if selected {
+                styles.selected_muted
+            } else {
+                styles.muted
+            };
+            let accent_style = if selected {
+                styles.selected_accent
+            } else {
+                styles.accent
+            };
+            let marker_style = if *is_current {
+                accent_style
+            } else if *pane_active {
+                if selected {
+                    styles.selected_pane_active
+                } else {
+                    styles.pane_active
+                }
+            } else {
+                muted_style
+            };
+            let marker = if *is_current {
+                "▶"
+            } else if *pane_active {
+                "●"
+            } else {
+                "○"
+            };
+            let title_style = if selected {
+                styles.selected_title
+            } else if *is_current {
+                styles.panel
+            } else {
+                styles.muted
+            };
+            let right = format!("{window_index}.{pane_index}");
+            let right_width = width_as_u16(&right).min(content.width);
+            let left_width = content.width.saturating_sub(right_width.saturating_add(1));
+            let left_area = Rect::new(content.x, content.y, left_width, 1);
+            let right_area = Rect::new(
+                content.right().saturating_sub(right_width),
+                content.y,
+                right_width,
+                1,
+            );
+            let mut spans = vec![
+                Span::styled(tree_prefix.as_str(), muted_style),
+                Span::styled(marker, marker_style),
+                Span::styled(" ", row_style),
+                Span::styled(item.title.as_str(), title_style),
+            ];
+            if !agent.is_empty() {
+                spans.push(Span::styled(format!("  {agent}"), muted_style));
+            }
+            frame.render_widget(
+                Paragraph::new(Line::from(spans)).style(row_style),
+                left_area,
+            );
+            frame.render_widget(
+                Paragraph::new(Span::styled(right, muted_style))
+                    .style(row_style)
+                    .alignment(Alignment::Right),
+                right_area,
+            );
+        }
+    }
+}
+
+fn shorten_home(path: &str) -> String {
+    let Some(home) = std::env::var_os("HOME") else {
+        return path.to_owned();
+    };
+    let home = home.to_string_lossy();
+    path.strip_prefix(home.as_ref())
+        .map_or_else(|| path.to_owned(), |suffix| format!("~{suffix}"))
 }
 
 fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App, styles: &ThemeStyles) {
@@ -1094,6 +1288,18 @@ mod tests {
     }
 
     #[test]
+    fn palette_initial_selection_is_used_when_selectable_and_falls_back_when_invalid() {
+        let mut palette = test_palette(vec![test_item("First"), test_item("Current")]);
+        palette.initial_selected = Some(1);
+        assert_eq!(App::new(palette, None).selected, Some(1));
+
+        let mut palette = test_palette(vec![test_item("First"), test_item("Disabled")]);
+        palette.items[1].selectable = false;
+        palette.initial_selected = Some(1);
+        assert_eq!(App::new(palette, None).selected, Some(0));
+    }
+
+    #[test]
     fn mouse_wheel_wraps_and_skips_non_selectable_items() {
         let mut disabled = test_item("Disabled");
         disabled.selectable = false;
@@ -1252,6 +1458,26 @@ mod tests {
     }
 
     #[test]
+    fn available_nested_palette_actions_replace_the_current_palette_and_reset_state() {
+        let item = Item::new("Commands", Action::palette("commands"));
+        let mut app = App::new(test_palette(vec![item]), None);
+        app.filter = "stale".to_owned();
+        app.filter_cursor = 5;
+        app.scroll = 3;
+        app.status = Some("stale".to_owned());
+
+        app.activate_selected();
+
+        assert_eq!(app.palette.name, "commands");
+        assert_eq!(app.selected, Some(0));
+        assert!(app.filter.is_empty());
+        assert_eq!(app.filter_cursor, 0);
+        assert_eq!(app.scroll, 0);
+        assert_eq!(app.status, None);
+        assert!(!app.should_quit);
+    }
+
+    #[test]
     fn typing_filters_and_ranks_commands_by_alias() {
         let mut app = App::new(palettes::load("commands").unwrap(), None);
 
@@ -1335,6 +1561,56 @@ mod tests {
         assert!(text.contains("First"));
         assert!(text.contains("Second"));
         assert!(text.contains("2 commands"));
+    }
+
+    #[test]
+    fn rendering_shows_find_pane_hierarchy_markers_agent_and_indices() {
+        let mut session = Item::new("work", Action::None);
+        session.selectable = false;
+        session.data = ItemData::FindPane(Box::new(FindPaneRow::Session {
+            session: "work".to_owned(),
+            count: 2,
+            path: "/project".to_owned(),
+            is_current: true,
+        }));
+        let mut window = Item::new("editor", Action::None);
+        window.selectable = false;
+        window.data = ItemData::FindPane(Box::new(FindPaneRow::Window {
+            session: "work".to_owned(),
+            window_index: "0".to_owned(),
+            tree_prefix: "  └─ ".to_owned(),
+        }));
+        let mut pane = Item::new("task", Action::None);
+        pane.data = ItemData::FindPane(Box::new(FindPaneRow::Pane {
+            session: "work".to_owned(),
+            window_index: "0".to_owned(),
+            pane_index: "1".to_owned(),
+            window_name: "editor".to_owned(),
+            tree_prefix: "      └─ ".to_owned(),
+            command: "codex".to_owned(),
+            path: "/project".to_owned(),
+            target: "work:0.1".to_owned(),
+            agent: "codex".to_owned(),
+            pane_active: true,
+            is_current: true,
+        }));
+        let mut palette = Palette::new("find-pane", "Find Pane", vec![session, window, pane]);
+        palette.grouped = false;
+        palette.filter = PaletteFilter::FindPaneTree;
+        palette.initial_selected = Some(2);
+        let mut app = App::new(palette, None);
+        let mut terminal = Terminal::new(TestBackend::new(50, 12)).unwrap();
+
+        terminal.draw(|frame| render(frame, &mut app)).unwrap();
+
+        assert!(buffer_row(&terminal, 4).contains("▶ work (2)  /project"));
+        assert!(buffer_row(&terminal, 5).contains("└─ editor"));
+        assert!(buffer_row(&terminal, 6).contains("└─ ▶ task  codex"));
+        assert!(buffer_row(&terminal, 6).ends_with("0.1   "));
+        assert_eq!(
+            terminal.backend().buffer()[(0, 6)].bg,
+            ratatui::style::Color::Rgb(80, 77, 122)
+        );
     }
 
     #[test]
