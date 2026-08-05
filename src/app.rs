@@ -208,6 +208,7 @@ impl App {
                     .is_some_and(|item| item.selectable)
             })
             .or_else(|| first_selectable(&palette.items));
+        let status = palette.warnings.first().cloned();
         let mut app = Self {
             palette,
             selected,
@@ -215,7 +216,7 @@ impl App {
             filter: String::new(),
             filter_cursor: 0,
             layout,
-            status: None,
+            status,
             dispatch_path,
             config_dir,
             stack: Vec::new(),
@@ -262,6 +263,7 @@ impl App {
             .or_else(|| first_selectable(&self.palette.items));
         self.scroll = 0;
         self.filter_cursor = 0;
+        self.status = self.palette.warnings.first().cloned();
         self.preview_selected_theme();
     }
 
@@ -986,6 +988,10 @@ fn render_item(
     let accent = if let ItemData::Theme(data) = &item.data {
         Style::new()
             .fg(data.theme.accent.ratatui())
+            .bg(style.bg.unwrap_or(Color::Reset))
+    } else if let Some(color) = item.icon_color.as_deref().and_then(ThemeColor::parse) {
+        Style::new()
+            .fg(color.ratatui())
             .bg(style.bg.unwrap_or(Color::Reset))
     } else if selected {
         styles.selected_accent

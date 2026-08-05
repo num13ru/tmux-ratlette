@@ -9,5 +9,6 @@ pub mod palettes;
 pub mod terminal;
 pub mod themes;
 mod tmux;
+mod user_config;
 
 pub use error::{Error, Result};

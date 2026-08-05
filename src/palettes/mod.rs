@@ -22,5 +22,6 @@ pub fn load(name: &str, config_dir: Option<&Path>) -> Option<Palette> {
     if name != "themes" {
         palette.theme = crate::themes::active_theme(config_dir);
     }
+    crate::user_config::apply(&mut palette, config_dir, name == "commands");
     Some(palette)
 }

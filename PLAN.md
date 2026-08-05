@@ -1440,9 +1440,9 @@ visible after filtering/resizing, and the popup remains usable with zero results
 - [x] Port `move-pane`.
 - [x] Port bundled and user themes with live preview and atomic persistence.
 - [x] Add the nested palette navigation stack and Escape/back behavior.
-- [ ] Load `commands.json`, `hidden.json`, `aliases.json`, and `shortcuts.json`. **Next.**
-- [ ] Load navigation, sizing, theme, and custom palette configuration.
-- [ ] Tolerate unknown optional fields and report malformed files with paths.
+- [x] Load `commands.json`, `hidden.json`, `aliases.json`, and `shortcuts.json`.
+- [x] Tolerate unknown optional fields and report malformed files with paths.
+- [ ] Load navigation, sizing, theme, and custom palette configuration. **Next.**
 - [ ] Execute shell-generated palette sources with timeout and output limits.
 - [ ] Parse plain-text, tab-separated, and JSON command output.
 - [ ] Show plugin command failures inside the palette.

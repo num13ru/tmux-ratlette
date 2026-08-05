@@ -16,6 +16,7 @@ pub struct Palette {
     pub items: Vec<Item>,
     pub filter: PaletteFilter,
     pub initial_selected: Option<usize>,
+    pub warnings: Vec<String>,
 }
 
 impl Palette {
@@ -29,6 +30,7 @@ impl Palette {
             items,
             filter: PaletteFilter::Default,
             initial_selected: None,
+            warnings: Vec::new(),
         }
     }
 
