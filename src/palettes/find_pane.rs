@@ -104,7 +104,7 @@ pub fn filter_indices(items: &[Item], query: &str) -> Vec<usize> {
                     } => windows.contains(&(session.as_str(), window_index.as_str())),
                     FindPaneRow::Pane { target, .. } => panes.contains(target.as_str()),
                 },
-                ItemData::None => false,
+                ItemData::None | ItemData::Theme(_) => false,
             };
             visible.then_some(index)
         })
@@ -206,7 +206,7 @@ fn palette_from_output(current_pane: &str, output: &str) -> Result<Palette, Stri
                 ..
             }
         ),
-        ItemData::None => false,
+        ItemData::None | ItemData::Theme(_) => false,
     });
     let mut palette = Palette::new("find-pane", "Find Pane", items);
     palette.grouped = false;

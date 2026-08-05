@@ -163,7 +163,19 @@ struct App {
     layout: LayoutOptions,
     status: Option<String>,
     dispatch_path: Option<PathBuf>,
+    config_dir: Option<PathBuf>,
+    stack: Vec<NavState>,
     should_quit: bool,
+}
+
+#[derive(Debug)]
+struct NavState {
+    palette: Palette,
+    selected: Option<usize>,
+    scroll: usize,
+    filter: String,
+    filter_cursor: usize,
+    status: Option<String>,
 }
 
 impl App {
@@ -172,10 +184,20 @@ impl App {
         Self::new_with_layout(palette, dispatch_path, LayoutOptions::default())
     }
 
+    #[cfg(test)]
     fn new_with_layout(
         palette: Palette,
         dispatch_path: Option<PathBuf>,
         layout: LayoutOptions,
+    ) -> Self {
+        Self::new_with_context(palette, dispatch_path, layout, None)
+    }
+
+    fn new_with_context(
+        palette: Palette,
+        dispatch_path: Option<PathBuf>,
+        layout: LayoutOptions,
+        config_dir: Option<PathBuf>,
     ) -> Self {
         let selected = palette
             .initial_selected
@@ -186,7 +208,7 @@ impl App {
                     .is_some_and(|item| item.selectable)
             })
             .or_else(|| first_selectable(&palette.items));
-        Self {
+        let mut app = Self {
             palette,
             selected,
             scroll: 0,
@@ -195,35 +217,91 @@ impl App {
             layout,
             status: None,
             dispatch_path,
+            config_dir,
+            stack: Vec::new(),
             should_quit: false,
-        }
+        };
+        app.preview_selected_theme();
+        app
     }
 
-    fn unsupported(name: &str, dispatch_path: Option<PathBuf>, layout: LayoutOptions) -> Self {
+    fn unsupported(
+        name: &str,
+        dispatch_path: Option<PathBuf>,
+        layout: LayoutOptions,
+        config_dir: Option<PathBuf>,
+    ) -> Self {
         let title = display_palette_name(name);
         let mut palette = Palette::new(name, &title, Vec::new());
         palette.grouped = false;
         palette.empty_text = format!("The {title} palette has not been ported to Rust yet");
-        let mut app = Self::new_with_layout(palette, dispatch_path, layout);
+        let mut app = Self::new_with_context(palette, dispatch_path, layout, config_dir);
         app.status = Some("Esc closes this placeholder".to_owned());
         app
     }
 
-    fn replace_palette(&mut self, palette: Palette) {
-        self.selected = palette
+    fn navigate_to(&mut self, palette: Palette) {
+        let previous = NavState {
+            palette: std::mem::replace(&mut self.palette, palette),
+            selected: self.selected,
+            scroll: self.scroll,
+            filter: std::mem::take(&mut self.filter),
+            filter_cursor: self.filter_cursor,
+            status: self.status.take(),
+        };
+        self.stack.push(previous);
+        self.selected = self
+            .palette
             .initial_selected
             .filter(|index| {
-                palette
+                self.palette
                     .items
                     .get(*index)
                     .is_some_and(|item| item.selectable)
             })
-            .or_else(|| first_selectable(&palette.items));
-        self.palette = palette;
+            .or_else(|| first_selectable(&self.palette.items));
         self.scroll = 0;
-        self.filter.clear();
         self.filter_cursor = 0;
-        self.status = None;
+        self.preview_selected_theme();
+    }
+
+    fn navigate_back(&mut self, committed_theme: Option<Theme>) -> bool {
+        let Some(mut previous) = self.stack.pop() else {
+            return false;
+        };
+        if let Some(theme) = committed_theme {
+            previous.palette.theme = theme;
+            for state in &mut self.stack {
+                state.palette.theme = theme;
+            }
+        }
+        self.palette = previous.palette;
+        self.selected = previous.selected;
+        self.scroll = previous.scroll;
+        self.filter = previous.filter;
+        self.filter_cursor = previous.filter_cursor;
+        self.status = previous.status;
+        true
+    }
+
+    fn escape_or_back(&mut self) {
+        if !self.navigate_back(None) {
+            self.should_quit = true;
+        }
+    }
+
+    fn preview_selected_theme(&mut self) {
+        let Some(theme) = self
+            .selected
+            .and_then(|index| self.palette.items.get(index))
+            .and_then(|item| match &item.data {
+                ItemData::Theme(data) => Some(data.theme),
+                ItemData::None | ItemData::FindPane(_) => None,
+            })
+        else {
+            return;
+        };
+        self.palette.theme = theme;
     }
 
     fn visible_indices(&self) -> Vec<usize> {
@@ -232,7 +310,7 @@ impl App {
                 crate::fuzzy::default_filter(&self.palette.items, &self.filter)
             }
             PaletteFilter::FindPaneTree => {
-                palettes::find_pane::filter_indices(&self.palette.items, &self.filter)
+                palettes::filter_find_pane(&self.palette.items, &self.filter)
             }
         }
     }
@@ -274,6 +352,7 @@ impl App {
         let next = (current + delta).rem_euclid(selectable.len() as isize) as usize;
         self.selected = Some(selectable[next]);
         self.status = None;
+        self.preview_selected_theme();
     }
 
     fn filter_changed(&mut self) {
@@ -283,6 +362,7 @@ impl App {
             .find(|index| self.palette.items[*index].selectable);
         self.scroll = 0;
         self.status = None;
+        self.preview_selected_theme();
     }
 
     fn ensure_selection_visible(&mut self, list_height: usize) {
@@ -336,8 +416,8 @@ impl App {
                 }
             }
             Action::Palette(name) => {
-                if let Some(palette) = palettes::load(&name) {
-                    self.replace_palette(palette);
+                if let Some(palette) = palettes::load(&name, self.config_dir.as_deref()) {
+                    self.navigate_to(palette);
                 } else {
                     self.status = Some(format!(
                         "The {} palette has not been ported to Rust yet",
@@ -347,6 +427,34 @@ impl App {
             }
             Action::Popup(_) => {
                 self.status = Some("Popup actions have not been ported to Rust yet".to_owned());
+            }
+            Action::ApplyTheme(slug) => {
+                let Some(config_dir) = self.config_dir.as_deref() else {
+                    self.status = Some(
+                        "Could not save theme: configuration directory unavailable".to_owned(),
+                    );
+                    return;
+                };
+                let selected_theme = self
+                    .selected
+                    .and_then(|index| self.palette.items.get(index))
+                    .and_then(|item| match &item.data {
+                        ItemData::Theme(data) if data.slug == slug => Some(data.theme),
+                        ItemData::None | ItemData::FindPane(_) | ItemData::Theme(_) => None,
+                    });
+                let Some(selected_theme) = selected_theme else {
+                    self.status =
+                        Some("Could not save theme: selected theme data unavailable".to_owned());
+                    return;
+                };
+                match themes::save_active_theme(config_dir, &slug) {
+                    Ok(()) => {
+                        if !self.navigate_back(Some(selected_theme)) {
+                            self.should_quit = true;
+                        }
+                    }
+                    Err(error) => self.status = Some(format!("Could not save theme: {error}")),
+                }
             }
             Action::None => {
                 self.status = Some("This item has no action".to_owned());
@@ -364,7 +472,7 @@ impl App {
                         && mouse.column >= escape.x
                         && mouse.column < escape.right()
                 }) {
-                    self.should_quit = true;
+                    self.escape_or_back();
                     return;
                 }
 
@@ -391,6 +499,7 @@ impl App {
                 }
                 self.selected = Some(index);
                 self.status = None;
+                self.preview_selected_theme();
                 self.activate_selected();
             }
             MouseEventKind::Up(_)
@@ -483,7 +592,7 @@ impl App {
         let control = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         match key.code {
-            KeyCode::Esc => self.should_quit = true,
+            KeyCode::Esc => self.escape_or_back(),
             KeyCode::Char('c' | 'C') if control => self.should_quit = true,
             KeyCode::Up | KeyCode::Char('p' | 'P') if control => self.move_selection(-1),
             KeyCode::Down | KeyCode::Char('n' | 'N') if control => self.move_selection(1),
@@ -552,7 +661,7 @@ fn word_forward(value: &str, from: usize) -> usize {
 }
 
 pub fn run(invocation: Invocation) -> Result<()> {
-    let _config_dir = resolve_config_dir(invocation.config_dir.as_deref())?;
+    let config_dir = resolve_config_dir(invocation.config_dir.as_deref())?;
 
     match invocation.mode {
         Mode::Measure => {
@@ -563,16 +672,17 @@ pub fn run(invocation: Invocation) -> Result<()> {
                     invocation.category.as_deref(),
                     invocation.client_width,
                     invocation.client_height,
+                    Some(&config_dir),
                 )
             );
             Ok(())
         }
-        Mode::Interactive => run_interactive(&invocation),
+        Mode::Interactive => run_interactive(&invocation, config_dir),
     }
 }
 
 pub fn measure(client_width: Option<NonZeroU16>, client_height: Option<NonZeroU16>) -> Measurement {
-    measure_palette("commands", None, client_width, client_height)
+    measure_palette("commands", None, client_width, client_height, None)
 }
 
 fn measure_palette(
@@ -580,8 +690,9 @@ fn measure_palette(
     category: Option<&str>,
     client_width: Option<NonZeroU16>,
     client_height: Option<NonZeroU16>,
+    config_dir: Option<&std::path::Path>,
 ) -> Measurement {
-    let (rows, theme) = palettes::load(palette_name)
+    let (rows, theme) = palettes::load(palette_name, config_dir)
         .map(|mut palette| {
             if let Some(category) = category {
                 palette.filter_category(category);
@@ -629,17 +740,17 @@ fn desired_height(palette: &Palette) -> u16 {
         .clamp(DEFAULT_EMPTY_HEIGHT, DEFAULT_MAX_HEIGHT)
 }
 
-fn run_interactive(invocation: &Invocation) -> Result<()> {
+fn run_interactive(invocation: &Invocation, config_dir: PathBuf) -> Result<()> {
     let dispatch_path = std::env::var_os("TMUX_PALETTE_CMD").map(PathBuf::from);
     let layout = LayoutOptions::from_env();
-    let mut app = match palettes::load(&invocation.palette) {
+    let mut app = match palettes::load(&invocation.palette, Some(&config_dir)) {
         Some(mut palette) => {
             if let Some(category) = invocation.category.as_deref() {
                 palette.filter_category(category);
             }
-            App::new_with_layout(palette, dispatch_path, layout)
+            App::new_with_context(palette, dispatch_path, layout, Some(config_dir.clone()))
         }
-        None => App::unsupported(&invocation.palette, dispatch_path, layout),
+        None => App::unsupported(&invocation.palette, dispatch_path, layout, Some(config_dir)),
     };
     let mut terminal = TerminalSession::enter(!invocation.no_mouse)?;
 
@@ -872,7 +983,11 @@ fn render_item(
     } else {
         styles.item
     };
-    let accent = if selected {
+    let accent = if let ItemData::Theme(data) = &item.data {
+        Style::new()
+            .fg(data.theme.accent.ratatui())
+            .bg(style.bg.unwrap_or(Color::Reset))
+    } else if selected {
         styles.selected_accent
     } else {
         styles.accent
@@ -1223,7 +1338,7 @@ mod tests {
 
     #[test]
     fn category_measurement_uses_only_matching_commands() {
-        let result = measure_palette("commands", Some("System"), None, None);
+        let result = measure_palette("commands", Some("System"), None, None, None);
 
         assert_eq!(result.rows, 8);
     }
@@ -1247,7 +1362,13 @@ mod tests {
 
     #[test]
     fn short_mobile_clients_still_fit_the_palette_chrome() {
-        let result = measure_palette("missing", None, NonZeroU16::new(60), NonZeroU16::new(2));
+        let result = measure_palette(
+            "missing",
+            None,
+            NonZeroU16::new(60),
+            NonZeroU16::new(2),
+            None,
+        );
 
         assert_eq!(result.rows, DEFAULT_EMPTY_HEIGHT);
     }
@@ -1448,13 +1569,13 @@ mod tests {
 
     #[test]
     fn nested_palette_actions_report_the_unavailable_feature() {
-        let item = Item::new("Themes", Action::palette("themes"));
+        let item = Item::new("Missing", Action::palette("missing"));
         let mut app = App::new(test_palette(vec![item]), None);
 
         app.activate_selected();
 
         assert!(!app.should_quit);
-        assert!(app.status.unwrap().contains("Themes palette"));
+        assert!(app.status.unwrap().contains("Missing palette"));
     }
 
     #[test]
@@ -1474,12 +1595,90 @@ mod tests {
         assert_eq!(app.filter_cursor, 0);
         assert_eq!(app.scroll, 0);
         assert_eq!(app.status, None);
+        assert_eq!(app.stack.len(), 1);
         assert!(!app.should_quit);
     }
 
     #[test]
+    fn theme_preview_changes_with_selection_and_escape_restores_previous_palette_state() {
+        let directory = temp_file();
+        fs::create_dir(&directory).unwrap();
+        let original_theme = themes::default_theme();
+        let item = Item::new("Themes", Action::palette("themes"));
+        let mut app = App::new_with_context(
+            test_palette(vec![item]),
+            None,
+            LayoutOptions::default(),
+            Some(directory.clone()),
+        );
+        app.filter = "saved query".to_owned();
+        app.filter_cursor = 11;
+
+        app.activate_selected();
+        let first_preview = app.palette.theme;
+        app.move_selection(1);
+
+        assert_eq!(app.palette.name, "themes");
+        assert_ne!(first_preview, app.palette.theme);
+        assert_ne!(app.palette.theme, original_theme);
+        app.handle_key(press(KeyCode::Esc));
+        assert_eq!(app.palette.name, "test");
+        assert_eq!(app.palette.theme, original_theme);
+        assert_eq!(app.filter, "saved query");
+        assert_eq!(app.filter_cursor, 11);
+        assert!(!app.should_quit);
+        fs::remove_dir(directory).unwrap();
+    }
+
+    #[test]
+    fn applying_a_theme_persists_and_returns_with_the_committed_theme() {
+        let directory = temp_file();
+        fs::create_dir(&directory).unwrap();
+        let item = Item::new("Themes", Action::palette("themes"));
+        let mut app = App::new_with_context(
+            test_palette(vec![item]),
+            None,
+            LayoutOptions::default(),
+            Some(directory.clone()),
+        );
+
+        app.activate_selected();
+        let committed = app.palette.theme;
+        app.activate_selected();
+
+        assert_eq!(app.palette.name, "test");
+        assert_eq!(app.palette.theme, committed);
+        assert!(app.stack.is_empty());
+        assert_eq!(
+            fs::read_to_string(directory.join("theme.json")).unwrap(),
+            "{\n  \"name\": \"ayu-dark\"\n}\n"
+        );
+        assert!(!app.should_quit);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn theme_save_failure_stays_in_the_picker_with_an_actionable_status() {
+        let config_file = temp_file();
+        fs::write(&config_file, "not a directory").unwrap();
+        let mut app = App::new_with_context(
+            palettes::load("themes", None).unwrap(),
+            None,
+            LayoutOptions::default(),
+            Some(config_file.clone()),
+        );
+
+        app.activate_selected();
+
+        assert_eq!(app.palette.name, "themes");
+        assert!(app.status.unwrap().contains("Could not save theme"));
+        assert!(!app.should_quit);
+        fs::remove_file(config_file).unwrap();
+    }
+
+    #[test]
     fn typing_filters_and_ranks_commands_by_alias() {
-        let mut app = App::new(palettes::load("commands").unwrap(), None);
+        let mut app = App::new(palettes::load("commands", None).unwrap(), None);
 
         app.handle_key(press(KeyCode::Char('n')));
         app.handle_key(press(KeyCode::Char('s')));
@@ -1561,6 +1760,20 @@ mod tests {
         assert!(text.contains("First"));
         assert!(text.contains("Second"));
         assert!(text.contains("2 commands"));
+    }
+
+    #[test]
+    fn rendering_live_previews_the_selected_theme_and_its_accent_dot() {
+        let mut terminal = Terminal::new(TestBackend::new(50, 12)).unwrap();
+        let mut app = App::new(palettes::load("themes", None).unwrap(), None);
+
+        terminal.draw(|frame| render(frame, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        assert_eq!(app.palette.items[0].title, "Ayu Dark");
+        assert_eq!(buffer[(0, 0)].bg, Color::Rgb(36, 46, 65));
+        assert_eq!(buffer[(5, 4)].fg, Color::Rgb(83, 189, 250));
+        assert_eq!(buffer[(0, 4)].bg, Color::Rgb(63, 80, 114));
     }
 
     #[test]

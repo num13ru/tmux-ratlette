@@ -1,11 +1,11 @@
 use std::ffi::OsString;
 use std::process::Command;
 
-pub fn run(arguments: &[&str]) -> Result<String, String> {
+pub(crate) fn run(arguments: &[&str]) -> Result<String, String> {
     run_os(&arguments.iter().map(OsString::from).collect::<Vec<_>>())
 }
 
-pub fn display_current(format: &str) -> Result<String, String> {
+pub(crate) fn display_current(format: &str) -> Result<String, String> {
     let mut arguments = vec![OsString::from("display-message"), OsString::from("-p")];
     if let Some(pane_id) = std::env::var_os("TMUX_PANE").filter(|value| !value.is_empty()) {
         arguments.push(OsString::from("-t"));
@@ -15,7 +15,7 @@ pub fn display_current(format: &str) -> Result<String, String> {
     run_os(&arguments)
 }
 
-pub fn quote(value: &str) -> String {
+pub(crate) fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 

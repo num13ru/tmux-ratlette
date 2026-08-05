@@ -19,7 +19,7 @@ fn encode_action(action: &Action) -> Option<String> {
     match action {
         Action::Tmux(command) => Some(format!("tmux:{command}")),
         Action::Shell(command) => Some(format!("shell:{command}")),
-        Action::Popup(_) | Action::Palette(_) | Action::None => None,
+        Action::Popup(_) | Action::Palette(_) | Action::ApplyTheme(_) | Action::None => None,
     }
 }
 

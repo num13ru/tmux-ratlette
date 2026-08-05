@@ -1,9 +1,16 @@
-use super::Action;
+use super::{Action, Theme};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ItemData {
     None,
     FindPane(Box<FindPaneRow>),
+    Theme(ThemeItem),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThemeItem {
+    pub slug: String,
+    pub theme: Theme,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

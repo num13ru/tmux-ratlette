@@ -4,6 +4,7 @@ pub enum Action {
     Shell(String),
     Popup(String),
     Palette(String),
+    ApplyTheme(String),
     None,
 }
 

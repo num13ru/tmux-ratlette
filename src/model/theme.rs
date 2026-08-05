@@ -50,6 +50,29 @@ impl ThemeColor {
         }
     }
 
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "transparent" => Some(Self::Default),
+            "black" => Some(Self::Black),
+            "red" => Some(Self::Red),
+            "green" => Some(Self::Green),
+            "yellow" => Some(Self::Yellow),
+            "blue" => Some(Self::Blue),
+            "magenta" => Some(Self::Magenta),
+            "cyan" => Some(Self::Cyan),
+            "white" => Some(Self::White),
+            "bright-black" => Some(Self::BrightBlack),
+            "bright-red" => Some(Self::BrightRed),
+            "bright-green" => Some(Self::BrightGreen),
+            "bright-yellow" => Some(Self::BrightYellow),
+            "bright-blue" => Some(Self::BrightBlue),
+            "bright-magenta" => Some(Self::BrightMagenta),
+            "bright-cyan" => Some(Self::BrightCyan),
+            "bright-white" => Some(Self::BrightWhite),
+            _ => parse_hex(value),
+        }
+    }
+
     pub fn tmux(self) -> String {
         match self {
             Self::Default => "default".to_owned(),
@@ -72,6 +95,18 @@ impl ThemeColor {
             Self::Rgb(red, green, blue) => format!("#{red:02x}{green:02x}{blue:02x}"),
         }
     }
+}
+
+fn parse_hex(value: &str) -> Option<ThemeColor> {
+    let hex = value.strip_prefix('#').unwrap_or(value);
+    if hex.len() != 6 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(ThemeColor::Rgb(
+        u8::from_str_radix(&hex[0..2], 16).ok()?,
+        u8::from_str_radix(&hex[2..4], 16).ok()?,
+        u8::from_str_radix(&hex[4..6], 16).ok()?,
+    ))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,5 +149,23 @@ mod tests {
         assert_eq!(ThemeColor::Default.tmux(), "default");
         assert_eq!(ThemeColor::BrightBlack.ratatui(), Color::DarkGray);
         assert_eq!(ThemeColor::BrightBlack.tmux(), "brightblack");
+    }
+
+    #[test]
+    fn parses_config_hex_transparency_and_ansi_names() {
+        assert_eq!(
+            ThemeColor::parse("#2d2b55"),
+            Some(ThemeColor::Rgb(45, 43, 85))
+        );
+        assert_eq!(
+            ThemeColor::parse("2D2B55"),
+            Some(ThemeColor::Rgb(45, 43, 85))
+        );
+        assert_eq!(ThemeColor::parse("transparent"), Some(ThemeColor::Default));
+        assert_eq!(
+            ThemeColor::parse("bright-blue"),
+            Some(ThemeColor::BrightBlue)
+        );
+        assert_eq!(ThemeColor::parse("#xyzxyz"), None);
     }
 }

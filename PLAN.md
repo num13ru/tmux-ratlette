@@ -1438,9 +1438,9 @@ visible after filtering/resizing, and the popup remains usable with zero results
 
 - [x] Port `find-pane` and its initial current-pane selection.
 - [x] Port `move-pane`.
-- [ ] Port bundled and user themes with live preview and atomic persistence. **Next.**
-- [ ] Add the nested palette navigation stack and Escape/back behavior.
-- [ ] Load `commands.json`, `hidden.json`, `aliases.json`, and `shortcuts.json`.
+- [x] Port bundled and user themes with live preview and atomic persistence.
+- [x] Add the nested palette navigation stack and Escape/back behavior.
+- [ ] Load `commands.json`, `hidden.json`, `aliases.json`, and `shortcuts.json`. **Next.**
 - [ ] Load navigation, sizing, theme, and custom palette configuration.
 - [ ] Tolerate unknown optional fields and report malformed files with paths.
 - [ ] Execute shell-generated palette sources with timeout and output limits.
