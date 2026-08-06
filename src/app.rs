@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::num::NonZeroU16;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crossterm::event::{
     self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
@@ -20,7 +21,7 @@ use crate::dispatch;
 use crate::model::{
     Action, FindPaneRow, Item, ItemData, Palette, PaletteFilter, Theme, ThemeColor,
 };
-use crate::terminal::TerminalSession;
+use crate::terminal::{SignalHandlers, TerminalSession};
 use crate::user_config::{EscapeBehavior, NavigationConfig, RuntimeConfig, SizingConfig};
 use crate::{Result, palettes, themes};
 
@@ -29,6 +30,7 @@ const DEFAULT_PAD_X: u16 = 3;
 const UNBORDERED_CHROME_ROWS: u16 = 7;
 const BORDERED_CHROME_ROWS: u16 = 5;
 const PAGE_SIZE: isize = 10;
+const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone, Copy)]
 struct ThemeStyles {
@@ -1030,10 +1032,19 @@ fn run_interactive(
     app.relaunch_debug = invocation.debug;
     app.relaunch_client_width = invocation.client_width;
     app.relaunch_client_height = invocation.client_height;
+    let signals = SignalHandlers::install().map_err(crate::Error::Terminal)?;
     let mut terminal = TerminalSession::enter(!invocation.no_mouse)?;
+    let mut area = terminal.draw(|frame| render(frame, &mut app))?;
 
-    while !app.should_quit {
-        let area = terminal.draw(|frame| render(frame, &mut app))?;
+    while !app.should_quit && !signals.received() {
+        match event::poll(EVENT_POLL_INTERVAL) {
+            Ok(false) => continue,
+            Ok(true) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted && signals.received() => {
+                break;
+            }
+            Err(error) => return Err(crate::Error::Terminal(error)),
+        }
 
         match event::read().map_err(crate::Error::Terminal)? {
             Event::Key(key) => app.handle_key(key),
@@ -1041,6 +1052,9 @@ fn run_interactive(
             Event::Resize(_, _) => {}
             Event::Paste(text) => app.insert_text(&text),
             Event::FocusGained | Event::FocusLost => {}
+        }
+        if !app.should_quit {
+            area = terminal.draw(|frame| render(frame, &mut app))?;
         }
     }
     Ok(())

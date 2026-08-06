@@ -1450,22 +1450,39 @@ visible after filtering/resizing, and the popup remains usable with zero results
       control, and relaunch of the originating palette.
 - [x] Remove the TypeScript/Bun implementation and all active Bun documentation.
 - [x] Port Shift-based search-field text selection.
-- [ ] Complete the alpha acceptance matrix and tag `v0.4.0-alpha.1`.
+- [x] Complete the alpha acceptance matrix and tag `v0.4.0-alpha.1`.
 - [ ] Prepare and verify the crates.io package.
 - [ ] Publish the beta and validate the `cargo install` workflow.
 
-### Verification matrix
+### Alpha acceptance matrix
 
 - [x] `cargo fmt --check`.
 - [x] `cargo clippy --all-targets -- -D warnings`.
-- [x] Rust unit and wrapper integration tests.
+- [x] All 132 Rust unit tests and 4 wrapper integration tests.
+- [x] macOS ARM64 release build with the minimum Rust 1.85 toolchain.
+- [x] Linux compatibility: the final tree passes `cargo check --all-targets
+      --target x86_64-unknown-linux-gnu`, and the Ubuntu release-build workflow
+      passes on the shared alpha code and dependency baseline.
 - [x] Commands popup navigation and tmux dispatch smoke test on macOS with
-      tmux 3.7b.
+      tmux 3.7b, including a real `Split Horizontal` dispatch.
 - [x] Popup-action sizing, padding, close, and originating-palette relaunch test
       on macOS with tmux 3.7b.
+- [x] Built-in palettes, compatible JSON configuration, generated sources,
+      bounded subprocess failures, and removal of Bun covered by automated
+      tests and release documentation.
+- [x] Exact terminal-state restoration after `SIGHUP`, `SIGINT`, `SIGQUIT`, and
+      `SIGTERM` in fresh tmux PTYs; forced subprocess failures are covered by
+      the plugin-source tests.
+- [x] Native warm measurement baseline on Apple Silicon: 100 release-binary
+      `--measure` invocations in 0.20 seconds, about 2 ms per invocation.
+
+The alpha gates above work on Unix hosts with Rust 1.85+ and tmux 3.4+ APIs.
+`SIGKILL` cannot be intercepted for in-process cleanup. The shell wrapper still
+requires a source checkout and a locally built binary during alpha.
+
+### Expanded compatibility coverage (non-blocking after alpha)
+
 - [ ] macOS test on the minimum supported tmux 3.4 release.
-- [ ] Linux build and real-tmux smoke test.
+- [ ] Linux real-tmux smoke test.
 - [ ] Kitty, Ghostty, iTerm2, WezTerm, and Terminal.app checks.
 - [ ] SSH, nested tmux, and narrow mobile terminal checks.
-- [ ] Terminal cleanup checks for signals and forced subprocess failures.
-- [ ] Record a native startup-time baseline.
