@@ -1451,7 +1451,7 @@ visible after filtering/resizing, and the popup remains usable with zero results
 - [x] Remove the TypeScript/Bun implementation and all active Bun documentation.
 - [x] Port Shift-based search-field text selection.
 - [x] Complete the alpha acceptance matrix and tag `v0.4.0-alpha.1`.
-- [ ] Prepare and verify the crates.io package.
+- [x] Prepare and verify the crates.io package.
 - [ ] Publish the beta and validate the `cargo install` workflow.
 
 ### Alpha acceptance matrix
@@ -1486,3 +1486,20 @@ requires a source checkout and a locally built binary during alpha.
 - [ ] Linux real-tmux smoke test.
 - [ ] Kitty, Ghostty, iTerm2, WezTerm, and Terminal.app checks.
 - [ ] SSH, nested tmux, and narrow mobile terminal checks.
+
+### crates.io package verification
+
+- [x] Confirm `tmux-ratlette` is absent from the crates.io registry.
+- [x] Add the upstream-compatible MIT license and complete package metadata.
+- [x] Limit the archive to release documentation, Rust sources, the wrapper,
+      and their tests.
+- [x] Run `cargo package --allow-dirty --locked` and inspect the normalized
+      manifest, file inventory, executable permissions, and archive checksum.
+- [x] Run all 132 unit and 4 wrapper integration tests from the extracted crate.
+- [x] Run the packaged binary's version and measurement commands.
+- [x] Run `cargo publish --dry-run --allow-dirty --locked` without uploading
+      the crate.
+
+Verified on 2026-08-06: 34 files, 302.8 KiB unpacked and 72.2 KiB compressed.
+The crate remains unpublished; registry name availability can change until the
+first real publish reserves it.
