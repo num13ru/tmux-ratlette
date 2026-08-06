@@ -14,14 +14,14 @@ and opens quickly enough to use as a regular tmux binding.
 > without migration, including commands, hidden items, aliases, shortcuts,
 > sizing, navigation, themes, and custom palettes. The runtime and installation
 > are not drop-in compatible: this fork replaces Bun/TypeScript with a locally
-> built Rust binary. The alpha preserves the documented configuration schema,
-> but undocumented fields and the broader terminal/platform matrix are not yet
-> guaranteed.
+> installed Rust binary. Version `0.4.0` preserves the documented configuration
+> schema, but undocumented fields and the broader terminal/platform matrix are
+> not guaranteed.
 
 > [!NOTE]
-> `0.4.0-alpha.1` is the first contributor-oriented Rust alpha. Build the tagged
-> checkout with `cargo build --release`; crates.io and prebuilt binaries are
-> planned for a later release.
+> `0.4.0` is the first stable Rust release. Install the executable from crates.io
+> with Cargo; TPM or a source checkout supplies the tmux wrapper and bindings.
+> Prebuilt binaries are not available yet.
 
 Type a few letters, pick a command, hit enter: split a pane, jump to a window,
 detach a session, open a popup tool, or switch to a custom palette. User config
@@ -37,10 +37,11 @@ https://github.com/user-attachments/assets/5edce838-9199-4123-8262-352bc47e989c
 
 ## Status
 
-The first Rust alpha is usable on the validated macOS/tmux path and passes the
-Linux CI build. The wider terminal-emulator, SSH, nested-tmux, and mobile-device
-matrix is still compatibility coverage rather than an alpha release gate. Expect
-installation and packaging details to change before beta.
+The stable Rust release is validated on macOS ARM64 with tmux 3.7b and passes
+the Linux CI build. The wider terminal-emulator, SSH, nested-tmux, and
+mobile-device matrix is not yet exhaustive. Existing documented JSON
+configuration is intended to remain compatible; the Bun/TypeScript runtime and
+installation method are intentionally replaced by Rust and Cargo.
 
 If you'd like to contribute, the most useful work right now is anything that
 improves the existing base (refactors, perf, polish, docs) or fixes a bug. New
@@ -74,14 +75,38 @@ See [`examples/`](examples) for drop-in palettes you can copy into
 
 ## Install
 
-Use TPM if you already use it; otherwise manual install is the simplest path.
-The AI-agent option is just a guided setup flow.
+Install the executable with Cargo, then use TPM for the wrapper and bindings.
+A manual source checkout and an AI-guided setup are also available.
 
 ### Requirements
 
-- Rust 1.85+ and Cargo (until packaged releases are available)
+- Rust 1.85+ and Cargo
 - tmux 3.4+ recommended (`display-popup -E` support)
 - Optional tools for examples only: `gh`, `jq`, `docker`, `npm`, `git`, etc.
+
+### Cargo + TPM (recommended)
+
+Install the executable from crates.io:
+
+```bash
+cargo install tmux-ratlette --version 0.4.0 --locked
+```
+
+Then add the plugin to `.tmux.conf`:
+
+```tmux
+set -g @plugin 'num13ru/tmux-ratlette'
+```
+
+Press `prefix + I` to install it through TPM, then reload tmux. Cargo installs
+the `tmux-ratlette` executable; TPM installs `tmux-palette.tmux` and
+`bin/tmux-palette.sh`. If the tmux server cannot find `~/.cargo/bin` on its
+`PATH`, run `command -v tmux-ratlette` in your shell and paste the resulting
+absolute path into `.tmux.conf`:
+
+```tmux
+set -g @palette-binary '/absolute/path/to/tmux-ratlette'
+```
 
 <details>
 <summary><b>Manual install</b></summary>
@@ -124,17 +149,18 @@ set -g @palette-find-pane-key 'M-f'       # optional, no binding by default
 set -g @palette-move-pane-key 'M-m'       # optional, no binding by default
 ```
 
-Then `prefix + I` (TPM's install key) to clone the plugin, build its binary,
-and reload tmux:
+Then `prefix + I` (TPM's install key) to clone the plugin. Install the executable
+from crates.io and reload tmux:
 
 ```bash
-cargo build --release --manifest-path ~/.tmux/plugins/tmux-ratlette/Cargo.toml
+cargo install tmux-ratlette --version 0.4.0 --locked
 tmux source-file ~/.tmux.conf
 ```
 
-TPM provides the bindings but does not install a Rust toolchain or build during
-tmux startup. Set `@palette-key 'off'` to skip the main binding and bind it
-yourself.
+TPM provides the wrapper and bindings but does not install the executable or a
+Rust toolchain. As a development alternative, build the plugin checkout with
+`cargo build --release --manifest-path ~/.tmux/plugins/tmux-ratlette/Cargo.toml`.
+Set `@palette-key 'off'` to skip the main binding and bind it yourself.
 
 </details>
 
@@ -144,9 +170,9 @@ yourself.
 <br/>
 
 This is optional; it is just a guided setup flow. Choose it if you want an
-agent to drive the onboarding experience: install the repo, set up the tmux
-binding, test that it opens, and optionally create your first custom commands
-or theme.
+agent to drive the onboarding experience: install the executable and wrapper,
+set up the tmux binding, test that it opens, and optionally create your first
+custom commands or theme.
 
 Paste the prompt below into [Claude Code](https://claude.com/claude-code), [Codex](https://github.com/openai/codex), [opencode](https://opencode.ai), Cursor, or any AI coding agent.
 
@@ -161,14 +187,16 @@ Follow steps in order. Confirm with the user before any change that modifies the
 - Run `rustc --version` and `cargo --version`. Rust 1.85 or newer is required. If Rust is missing or too old, point them to https://rustup.rs and stop — do not auto-install it.
 - Run `tmux -V`. If lower than 3.4, warn that `display-popup -E` may not work, then proceed.
 
-2. Clone and install
-- Default path: `~/Sites/tmux-ratlette`. Ask the user if they want a different location.
+2. Install the executable and wrapper
+- Run `cargo install tmux-ratlette --version 0.4.0 --locked`. If it fails, report the build error and stop.
+- Default wrapper path: `~/Sites/tmux-ratlette`. Ask the user if they want a different location.
 - If the path already exists and contains the repo, run `git -C <path> pull` and skip cloning.
 - Otherwise: `git clone https://github.com/num13ru/tmux-ratlette <path>`.
-- Run `cargo build --release --manifest-path <path>/Cargo.toml`. If it fails, report the build error and stop.
+- Run `command -v tmux-ratlette` and retain its absolute path. If it cannot be resolved, stop.
 
 3. Bind it to a tmux key (required — the palette doesn't open without one)
 - Default suggestion: `bind -n C-Space run-shell "<absolute-path>/bin/tmux-palette.sh"` (no-prefix, opens with Ctrl+Space). Ask the user if they want a different key.
+- Add `set -g @palette-binary '<absolute-binary-path>'` so the wrapper does not depend on the tmux server's PATH.
 - Append the bind line to `~/.tmux.conf` (create it if missing).
 - Run `tmux source-file ~/.tmux.conf` to reload (or tell them to do it).
 
@@ -239,8 +267,8 @@ Window", `cs` for "Choose Session", `sh` for "Split Horizontal", etc.
 - Requires tmux popup support; tmux 3.4+ is recommended.
 - Plugin commands run each time their palette opens. Add your own cache layer for
   slow commands.
-- This is currently built from the repo, including when installed via TPM; crates.io
-  and prebuilt releases are not available yet.
+- Cargo installs only the executable. The tmux wrapper and bindings still come
+  from TPM or a source checkout; prebuilt binary releases are not available yet.
 - `{ "shell": "..." }` and `{ "popup": "..." }` actions execute through the user's
   shell by design.
 
