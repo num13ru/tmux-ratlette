@@ -1445,8 +1445,8 @@ visible after filtering/resizing, and the popup remains usable with zero results
 - [x] Load navigation, sizing, theme, and custom palette configuration.
 - [x] Execute shell-generated palette sources with timeout and output limits.
 - [x] Parse plain-text, tab-separated, and JSON command output.
-- [ ] Show plugin command failures inside the palette. **Next.**
-- [ ] Remove the TypeScript/Bun implementation and all Bun documentation.
+- [x] Show plugin command failures inside the palette.
+- [ ] Remove the TypeScript/Bun implementation and all Bun documentation. **Next.**
 - [ ] Complete the alpha acceptance matrix and tag `v0.1.0-alpha.1`.
 - [ ] Prepare and verify the crates.io package.
 - [ ] Publish the beta and validate the `cargo install` workflow.

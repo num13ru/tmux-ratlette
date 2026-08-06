@@ -1530,6 +1530,27 @@ mod tests {
     }
 
     #[test]
+    fn leading_plugin_failure_row_is_skipped_and_cannot_block_static_actions() {
+        let path = temp_file();
+        let mut failure = Item::new("Plugin command failed", Action::None).icon("!");
+        failure.selectable = false;
+        let mut app = App::new(
+            test_palette(vec![failure, test_item("Static fallback")]),
+            Some(path.clone()),
+        );
+
+        assert_eq!(app.selected, Some(1));
+        app.handle_key(press(KeyCode::Enter));
+
+        assert!(app.should_quit);
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "tmux:display-message 'Static fallback'"
+        );
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn navigation_config_clamps_and_enables_vim_control_keys() {
         let runtime = RuntimeConfig {
             navigation: NavigationConfig {

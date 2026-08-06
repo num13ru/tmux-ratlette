@@ -422,7 +422,11 @@ impl RawCustomPalette {
                 )
             }) {
                 Ok(dynamic_items) => items.extend(dynamic_items),
-                Err(error) => source_warning = Some(warning(&path, error)),
+                Err(error) => {
+                    let message = warning(&path, error);
+                    items.push(plugin_failure_item(&message));
+                    source_warning = Some(message);
+                }
             }
         }
         items.extend(inline_items);
@@ -436,6 +440,13 @@ impl RawCustomPalette {
         }
         Ok(palette)
     }
+}
+
+fn plugin_failure_item(message: &str) -> Item {
+    let mut item = Item::new("Plugin command failed", Action::None).icon("!");
+    item.description = Some(message.to_owned());
+    item.selectable = false;
+    item
 }
 
 #[derive(Debug, Deserialize)]
@@ -760,7 +771,7 @@ mod tests {
     }
 
     #[test]
-    fn custom_palette_command_failures_warn_without_dropping_static_items() {
+    fn custom_palette_command_failures_add_disabled_rows_without_dropping_static_items() {
         let directory = temp_directory();
         fs::create_dir(directory.join("palettes")).unwrap();
         fs::write(
@@ -772,11 +783,47 @@ mod tests {
 
         let palette = custom_palette("failing", Some(&directory), &base.items).unwrap();
 
-        assert_eq!(palette.items.len(), 1);
-        assert_eq!(palette.items[0].title, "Still here");
+        assert_eq!(palette.items.len(), 2);
+        assert_eq!(palette.items[0].title, "Plugin command failed");
+        assert_eq!(palette.items[0].icon.as_deref(), Some("!"));
+        assert!(!palette.items[0].selectable);
+        assert_eq!(palette.items[0].action, Action::None);
+        assert_eq!(
+            palette.items[0].description.as_deref(),
+            palette.warnings.first().map(String::as_str)
+        );
+        assert_eq!(palette.items[1].title, "Still here");
+        assert!(palette.items[1].selectable);
         assert_eq!(palette.warnings.len(), 1);
         assert!(palette.warnings[0].contains("palettes/failing.json"));
         assert!(palette.warnings[0].contains("exit 9: failed-source"));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn plugin_parse_failures_are_visible_even_without_other_items() {
+        let directory = temp_directory();
+        fs::create_dir(directory.join("palettes")).unwrap();
+        fs::write(
+            directory.join("palettes/no-template.json"),
+            r#"{"command":"printf plain-output"}"#,
+        )
+        .unwrap();
+        let base = base_palette();
+
+        let palette = custom_palette("no-template", Some(&directory), &base.items).unwrap();
+
+        assert_eq!(palette.items.len(), 1);
+        assert_eq!(palette.items[0].title, "Plugin command failed");
+        assert!(!palette.items[0].selectable);
+        assert!(palette.warnings[0].contains("requires an action template"));
+        assert!(
+            palette.items[0]
+                .description
+                .as_deref()
+                .unwrap()
+                .contains("palettes/no-template.json")
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 }
