@@ -6,16 +6,10 @@ set -eu
 
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if ! command -v bun >/dev/null 2>&1; then
-  tmux display-message "tmux-palette: bun not found. Install Bun first: https://bun.sh"
+# Use the wrapper's resolver so TPM and direct development bindings agree
+# on @palette-binary, TMUX_PALETTE_BIN, checkout builds, and PATH installs.
+if ! "$CURRENT_DIR/bin/tmux-palette.sh" --check >/dev/null; then
   exit 0
-fi
-
-if [ ! -d "$CURRENT_DIR/node_modules" ]; then
-  (cd "$CURRENT_DIR" && bun install --silent) >/dev/null 2>&1 || {
-    tmux display-message "tmux-palette: 'bun install' failed in $CURRENT_DIR"
-    exit 0
-  }
 fi
 
 get_opt() {

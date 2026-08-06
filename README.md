@@ -1,7 +1,12 @@
 # tmux-palette
 
-A command palette for tmux. It runs on [Bun](https://bun.sh), has no runtime
-dependencies, and opens quickly enough to use as a regular tmux binding.
+A native Rust command palette for tmux. It has no runtime package dependencies
+and opens quickly enough to use as a regular tmux binding.
+
+> [!NOTE]
+> The Rust migration is complete, but the first alpha acceptance matrix is still
+> in progress. Build the current checkout with `cargo build --release`; see
+> [PLAN.md](PLAN.md) for the remaining platform and terminal checks.
 
 Type a few letters, pick a command, hit enter: split a pane, jump to a window,
 detach a session, open a popup tool, or switch to a custom palette. User config
@@ -17,9 +22,9 @@ https://github.com/user-attachments/assets/5edce838-9199-4123-8262-352bc47e989c
 
 ## Status
 
-The tool is in beta. It's stable enough to use day-to-day, but the surface area
-is still settling — I want the next few weeks to be about running it myself,
-gathering feedback, and shaking out bugs rather than growing the feature set.
+The Rust version is preparing for its first alpha. Its core behavior is usable,
+but platform and terminal coverage is still incomplete. Expect installation and
+packaging details to change before beta.
 
 If you'd like to contribute, the most useful work right now is anything that
 improves the existing base (refactors, perf, polish, docs) or fixes a bug. New
@@ -35,7 +40,7 @@ first to discuss before writing code.
 - **Curated themes** — 13 built-in themes including Shades of Purple, Dracula, Tokyo Night, Catppuccin, Gruvbox, Nord, Solarized, and a transparent `Terminal` theme that follows your terminal colors. [Pick one with live preview](#themes), or [drop your own](#custom-themes)
 - **Popup tools** — use `{ "popup": "htop" }` to open tools like `btop`, `lazygit`, log tails, or `fzf` scripts in a tmux popup
 - **Scriptable sources** — point a palette at a shell command that prints JSON or one item per line. Examples live in [`examples/`](examples)
-- **Small codebase** — roughly 2k LOC, so it is easy to audit, fork, or patch locally
+- **Native executable** — one Rust binary, with no runtime package installation
 - **No fork required** — every customization lives in `~/.config/tmux-palette/*.json`
 
 ## What you can build
@@ -58,7 +63,7 @@ The AI-agent option is just a guided setup flow.
 
 ### Requirements
 
-- [Bun](https://bun.sh)
+- Rust 1.85+ and Cargo (until packaged releases are available)
 - tmux 3.4+ recommended (`display-popup -E` support)
 - Optional tools for examples only: `gh`, `jq`, `docker`, `npm`, `git`, etc.
 
@@ -67,24 +72,22 @@ The AI-agent option is just a guided setup flow.
 
 <br/>
 
-Requires Bun: https://bun.sh
-
 ```bash
-git clone https://github.com/eduwass/tmux-palette ~/Sites/tmux-palette
-cd ~/Sites/tmux-palette
-bun install
+git clone https://github.com/num13ru/tmux-ratlette ~/Sites/tmux-ratlette
+cd ~/Sites/tmux-ratlette
+cargo build --release
 ```
 
 Bind it to a tmux key in your `.tmux.conf` — `Ctrl+Space` gives the most "Raycast-feel" since it skips the prefix:
 
 ```tmux
-bind -n C-Space run-shell "~/Sites/tmux-palette/bin/tmux-palette.sh"
+bind -n C-Space run-shell "~/Sites/tmux-ratlette/bin/tmux-palette.sh"
 ```
 
 Or if you'd rather go through the tmux prefix:
 
 ```tmux
-bind p run-shell "~/Sites/tmux-palette/bin/tmux-palette.sh"
+bind p run-shell "~/Sites/tmux-ratlette/bin/tmux-palette.sh"
 ```
 
 Reload: `tmux source-file ~/.tmux.conf` and hit your binding.
@@ -96,20 +99,26 @@ Reload: `tmux source-file ~/.tmux.conf` and hit your binding.
 
 <br/>
 
-Requires Bun: https://bun.sh
-
 Add to your `.tmux.conf`:
 
 ```tmux
-set -g @plugin 'eduwass/tmux-palette'
+set -g @plugin 'num13ru/tmux-ratlette'
 set -g @palette-key 'C-Space'             # optional, default: C-Space (no-prefix)
 set -g @palette-find-pane-key 'M-f'       # optional, no binding by default
 set -g @palette-move-pane-key 'M-m'       # optional, no binding by default
 ```
 
-Then `prefix + I` (TPM's install key) to install. TPM clones the repo,
-runs `bun install` on first load, and binds the keys for you. Set
-`@palette-key 'off'` to skip the main binding and bind it yourself.
+Then `prefix + I` (TPM's install key) to clone the plugin, build its binary,
+and reload tmux:
+
+```bash
+cargo build --release --manifest-path ~/.tmux/plugins/tmux-ratlette/Cargo.toml
+tmux source-file ~/.tmux.conf
+```
+
+TPM provides the bindings but does not install a Rust toolchain or build during
+tmux startup. Set `@palette-key 'off'` to skip the main binding and bind it
+yourself.
 
 </details>
 
@@ -126,20 +135,21 @@ or theme.
 Paste the prompt below into [Claude Code](https://claude.com/claude-code), [Codex](https://github.com/openai/codex), [opencode](https://opencode.ai), Cursor, or any AI coding agent.
 
 ```
-You are helping a user onboard tmux-palette, a small command palette for tmux. Repo: https://github.com/eduwass/tmux-palette
+You are helping a user onboard tmux-ratlette, a native command palette for tmux. Repo: https://github.com/num13ru/tmux-ratlette
 
 Goal: get the palette installed, bound to a key, tested inside tmux, and leave the user with one useful next customization if they want it.
 
 Follow steps in order. Confirm with the user before any change that modifies their files.
 
 1. Prerequisites
-- Run `bun --version`. If Bun is missing, point them to https://bun.sh/docs/installation and stop — do not auto-install.
+- Run `rustc --version` and `cargo --version`. Rust 1.85 or newer is required. If Rust is missing or too old, point them to https://rustup.rs and stop — do not auto-install it.
 - Run `tmux -V`. If lower than 3.4, warn that `display-popup -E` may not work, then proceed.
 
 2. Clone and install
-- Default path: `~/Sites/tmux-palette`. Ask the user if they want a different location.
+- Default path: `~/Sites/tmux-ratlette`. Ask the user if they want a different location.
 - If the path already exists and contains the repo, run `git -C <path> pull` and skip cloning.
-- Otherwise: `git clone https://github.com/eduwass/tmux-palette <path> && cd <path> && bun install`.
+- Otherwise: `git clone https://github.com/num13ru/tmux-ratlette <path>`.
+- Run `cargo build --release --manifest-path <path>/Cargo.toml`. If it fails, report the build error and stop.
 
 3. Bind it to a tmux key (required — the palette doesn't open without one)
 - Default suggestion: `bind -n C-Space run-shell "<absolute-path>/bin/tmux-palette.sh"` (no-prefix, opens with Ctrl+Space). Ask the user if they want a different key.
@@ -179,7 +189,7 @@ Only do one follow-up unless the user asks for more.
 Constraints
 - Prefer `~/.config/tmux-palette/*.json` over source edits. The user's config survives upstream pulls; source edits don't.
 - Do not push to git or modify files outside the user's home directory.
-- Do not auto-install Bun or any other system package.
+- Do not auto-install Rust or any other system package.
 - If anything fails, stop and explain what went wrong.
 ```
 
@@ -198,8 +208,8 @@ Window", `cs` for "Choose Session", `sh` for "Split Horizontal", etc.
 
 ## Trust And Safety
 
-- CI runs `bun test`, TypeScript, Fallow dead-code, and Fallow duplication checks.
-- The codebase is intentionally small and has no runtime package dependencies.
+- CI runs formatting, Clippy with warnings denied, all Rust tests, and a release build.
+- The executable has no runtime package dependencies.
 - Custom palettes are local JSON files, but they can run shell commands. Only copy
   palette examples you understand, especially if they come from outside this repo.
 - User config lives under `~/.config/tmux-palette/`; normal customization should not
@@ -210,7 +220,8 @@ Window", `cs` for "Choose Session", `sh` for "Split Horizontal", etc.
 - Requires tmux popup support; tmux 3.4+ is recommended.
 - Plugin commands run each time their palette opens. Add your own cache layer for
   slow commands.
-- This is currently installed from the repo or via TPM, not a packaged npm release.
+- This is currently built from the repo, including when installed via TPM; crates.io
+  and prebuilt releases are not available yet.
 - `{ "shell": "..." }` and `{ "popup": "..." }` actions execute through the user's
   shell by design.
 
@@ -529,38 +540,24 @@ Auto-aliases (initials like `nw`) still work for free, invisibly.
 
 ## Extending (deeper)
 
-For things JSON can't express — custom row rendering, dynamic item
-generators, custom filter logic — edit the TS source. Items in
-`src/palettes/commands.ts` have this shape:
-
-```ts
-{
-  icon: "󰍉",              // any nerd-font glyph
-  title: "Find Pane",
-  description?: "...",    // optional, dimmed text after title
-  shortcut?: "Cmd+Shift+P", // optional, right-aligned label
-  category?: "Panes",     // optional, groups items under a header
-  aliases?: ["fp"],       // optional, visible chip + searchable
-  action: { tmux: "..." } // see Actions below
-}
-```
+For things JSON cannot express—custom row rendering, dynamic item generators,
+or filter logic—work in the Rust source. Built-in command items live in
+`src/palettes/commands.rs`; reusable item and action types live under
+`src/model/`.
 
 ### Actions
 
-```ts
-{ tmux: "split-window -h" }     // runs `tmux <cmd>` after the popup closes
-{ shell: "echo hi" }            // runs a shell command after the popup closes
-{ popup: "htop" }               // opens cmd in a centered 80% tmux popup
-{ palette: "find-pane" }        // chains into another palette
-{ run: (ctx) => { ... } }       // custom JS, runs in-process, then exits
-{ apply: (ctx) => { ... } }     // custom JS, runs in-process, then pops
-                                // back to the previous palette (used by
-                                // the theme switcher to "apply + return")
+```rust
+Item::new("Split Horizontal", Action::tmux("split-window -h"))
+    .icon("")
+    .category("Panes")
+    .description("side by side")
 ```
 
-`{ tmux }` is special: it dispatches _after_ the popup closes, so interactive
-tmux prompts (`confirm-before`, `command-prompt`) actually get keyboard
-input. Without this, prompts hang because the popup still owns stdin.
+In user JSON, the supported actions remain `{ "tmux": "..." }`,
+`{ "shell": "..." }`, `{ "popup": "..." }`, and `{ "palette": "..." }`.
+Tmux actions dispatch _after_ the popup closes, so interactive prompts such as
+`confirm-before` and `command-prompt` can receive keyboard input.
 
 ## How it works (the trick)
 

@@ -1,0 +1,6 @@
+# query	items (title~category~comma-separated-aliases)	expected ranked titles
+sh	Split Horizontal~Panes~|New Window~Windows~|Choose Session~~sessions	Split Horizontal
+sessions	Choose Session~~sessions|New Window~Windows~	Choose Session
+ns	Detach~Sessions~|New Session~Sessions~|Next Session~Sessions~	New Session|Next Session|Detach
+split pane	Split Horizontal~Panes~|Split Vertical~Panes~|New Window~Windows~	Split Vertical|Split Horizontal
+zzzz	Split Horizontal~Panes~|New Window~Windows~
