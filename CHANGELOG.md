@@ -17,6 +17,8 @@ All notable changes to this project are documented here. The project follows
   cleanup, and visible non-selectable failure rows.
 - Popup actions with global or per-item dimensions, padding, and borders, plus
   relaunch of the originating palette after the popup command exits.
+- Shift-based search-field text selection, including character, word, and line
+  movement, replacement edits, Escape clearing, and themed highlighting.
 - Rust formatting, Clippy, test, and release-build checks in CI.
 
 ### Changed
@@ -33,8 +35,6 @@ All notable changes to this project are documented here. The project follows
 
 ### Known limitations
 
-- Shift-based search-field text selection from the legacy implementation has not
-  been ported yet.
 - The full platform, terminal-emulator, SSH, nested-tmux, and signal-cleanup
   acceptance matrix is not complete yet.
 - Installation currently builds the executable from a repository checkout;

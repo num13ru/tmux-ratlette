@@ -1449,7 +1449,7 @@ visible after filtering/resizing, and the popup remains usable with zero results
 - [x] Port popup actions with global and per-item sizing overrides, border
       control, and relaunch of the originating palette.
 - [x] Remove the TypeScript/Bun implementation and all active Bun documentation.
-- [ ] Port Shift-based search-field text selection. **Next.**
+- [x] Port Shift-based search-field text selection.
 - [ ] Complete the alpha acceptance matrix and tag `v0.4.0-alpha.1`.
 - [ ] Prepare and verify the crates.io package.
 - [ ] Publish the beta and validate the `cargo install` workflow.

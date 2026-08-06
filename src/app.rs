@@ -163,6 +163,7 @@ struct App {
     scroll: usize,
     filter: String,
     filter_cursor: usize,
+    selection_anchor: Option<usize>,
     layout: LayoutOptions,
     status: Option<String>,
     dispatch_path: Option<PathBuf>,
@@ -189,6 +190,7 @@ struct NavState {
     scroll: usize,
     filter: String,
     filter_cursor: usize,
+    selection_anchor: Option<usize>,
     status: Option<String>,
 }
 
@@ -252,6 +254,7 @@ impl App {
             scroll: 0,
             filter: String::new(),
             filter_cursor: 0,
+            selection_anchor: None,
             layout,
             status,
             dispatch_path,
@@ -297,6 +300,7 @@ impl App {
             scroll: self.scroll,
             filter: std::mem::take(&mut self.filter),
             filter_cursor: self.filter_cursor,
+            selection_anchor: self.selection_anchor,
             status: self.status.take(),
         };
         self.stack.push(previous);
@@ -312,6 +316,7 @@ impl App {
             .or_else(|| first_selectable(&self.palette.items));
         self.scroll = 0;
         self.filter_cursor = 0;
+        self.selection_anchor = None;
         self.status = self.palette.warnings.first().cloned();
         self.preview_selected_theme();
     }
@@ -331,11 +336,15 @@ impl App {
         self.scroll = previous.scroll;
         self.filter = previous.filter;
         self.filter_cursor = previous.filter_cursor;
+        self.selection_anchor = previous.selection_anchor;
         self.status = previous.status;
         true
     }
 
     fn escape_or_back(&mut self) {
+        if self.selection_anchor.take().is_some() {
+            return;
+        }
         if self.escape == EscapeBehavior::Exit || !self.navigate_back(None) {
             self.should_quit = true;
         }
@@ -639,6 +648,7 @@ impl App {
     }
 
     fn insert_character(&mut self, character: char) {
+        self.delete_selection();
         let byte_index = byte_index_at_character(&self.filter, self.filter_cursor);
         self.filter.insert(byte_index, character);
         self.filter_cursor += 1;
@@ -653,6 +663,7 @@ impl App {
         if text.is_empty() {
             return;
         }
+        self.delete_selection();
         let byte_index = byte_index_at_character(&self.filter, self.filter_cursor);
         self.filter.insert_str(byte_index, &text);
         self.filter_cursor += text.chars().count();
@@ -660,6 +671,10 @@ impl App {
     }
 
     fn backspace(&mut self) {
+        if self.delete_selection() {
+            self.filter_changed();
+            return;
+        }
         if self.filter_cursor == 0 {
             return;
         }
@@ -671,6 +686,10 @@ impl App {
     }
 
     fn delete(&mut self) {
+        if self.delete_selection() {
+            self.filter_changed();
+            return;
+        }
         if self.filter_cursor >= self.filter.chars().count() {
             return;
         }
@@ -681,6 +700,10 @@ impl App {
     }
 
     fn delete_word_back(&mut self) {
+        if self.delete_selection() {
+            self.filter_changed();
+            return;
+        }
         let start_cursor = word_back(&self.filter, self.filter_cursor);
         if start_cursor == self.filter_cursor {
             return;
@@ -693,6 +716,10 @@ impl App {
     }
 
     fn kill_to_start(&mut self) {
+        if self.delete_selection() {
+            self.filter_changed();
+            return;
+        }
         if self.filter_cursor == 0 {
             return;
         }
@@ -703,12 +730,78 @@ impl App {
     }
 
     fn kill_to_end(&mut self) {
+        if self.delete_selection() {
+            self.filter_changed();
+            return;
+        }
         let start = byte_index_at_character(&self.filter, self.filter_cursor);
         if start == self.filter.len() {
             return;
         }
         self.filter.truncate(start);
         self.filter_changed();
+    }
+
+    fn selection_range(&self) -> Option<(usize, usize)> {
+        let anchor = self.selection_anchor?;
+        let start = anchor.min(self.filter_cursor);
+        let end = anchor.max(self.filter_cursor);
+        (start != end).then_some((start, end))
+    }
+
+    fn delete_selection(&mut self) -> bool {
+        let Some((start_cursor, end_cursor)) = self.selection_range() else {
+            self.selection_anchor = None;
+            return false;
+        };
+        let start = byte_index_at_character(&self.filter, start_cursor);
+        let end = byte_index_at_character(&self.filter, end_cursor);
+        self.filter.replace_range(start..end, "");
+        self.filter_cursor = start_cursor;
+        self.selection_anchor = None;
+        true
+    }
+
+    fn extend_cursor_to(&mut self, target: usize) {
+        let target = target.min(self.filter.chars().count());
+        let anchor = *self.selection_anchor.get_or_insert(self.filter_cursor);
+        self.filter_cursor = target;
+        if anchor == target {
+            self.selection_anchor = None;
+        }
+    }
+
+    fn move_cursor_to(&mut self, target: usize, extend: bool) {
+        if extend {
+            self.extend_cursor_to(target);
+        } else {
+            self.filter_cursor = target.min(self.filter.chars().count());
+            self.selection_anchor = None;
+        }
+    }
+
+    fn move_cursor_left(&mut self, extend: bool) {
+        if extend {
+            self.extend_cursor_to(self.filter_cursor.saturating_sub(1));
+        } else if let Some((start, _)) = self.selection_range() {
+            self.filter_cursor = start;
+            self.selection_anchor = None;
+        } else {
+            self.filter_cursor = self.filter_cursor.saturating_sub(1);
+            self.selection_anchor = None;
+        }
+    }
+
+    fn move_cursor_right(&mut self, extend: bool) {
+        if extend {
+            self.extend_cursor_to(self.filter_cursor.saturating_add(1));
+        } else if let Some((_, end)) = self.selection_range() {
+            self.filter_cursor = end;
+            self.selection_anchor = None;
+        } else {
+            self.filter_cursor = (self.filter_cursor + 1).min(self.filter.chars().count());
+            self.selection_anchor = None;
+        }
     }
 
     fn handle_key(&mut self, key: KeyEvent) {
@@ -718,6 +811,7 @@ impl App {
 
         let control = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
+        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         match key.code {
             KeyCode::Esc => self.escape_or_back(),
             KeyCode::Char('c' | 'C') if control => self.should_quit = true,
@@ -740,20 +834,20 @@ impl App {
             KeyCode::PageUp => self.move_selection(-PAGE_SIZE),
             KeyCode::PageDown => self.move_selection(PAGE_SIZE),
             KeyCode::Left if control || alt => {
-                self.filter_cursor = word_back(&self.filter, self.filter_cursor);
+                let target = word_back(&self.filter, self.filter_cursor);
+                self.move_cursor_to(target, shift);
             }
             KeyCode::Right if control || alt => {
-                self.filter_cursor = word_forward(&self.filter, self.filter_cursor);
+                let target = word_forward(&self.filter, self.filter_cursor);
+                self.move_cursor_to(target, shift);
             }
-            KeyCode::Left => self.filter_cursor = self.filter_cursor.saturating_sub(1),
-            KeyCode::Right => {
-                self.filter_cursor = (self.filter_cursor + 1).min(self.filter.chars().count());
-            }
-            KeyCode::Home => self.filter_cursor = 0,
-            KeyCode::Char('a' | 'A') if control => self.filter_cursor = 0,
-            KeyCode::End => self.filter_cursor = self.filter.chars().count(),
+            KeyCode::Left => self.move_cursor_left(shift),
+            KeyCode::Right => self.move_cursor_right(shift),
+            KeyCode::Home => self.move_cursor_to(0, shift),
+            KeyCode::Char('a' | 'A') if control => self.move_cursor_to(0, shift),
+            KeyCode::End => self.move_cursor_to(self.filter.chars().count(), shift),
             KeyCode::Char('e' | 'E') if control => {
-                self.filter_cursor = self.filter.chars().count();
+                self.move_cursor_to(self.filter.chars().count(), shift);
             }
             KeyCode::Backspace if control || alt => self.delete_word_back(),
             KeyCode::Backspace => self.backspace(),
@@ -1041,33 +1135,68 @@ fn render_search(frame: &mut Frame<'_>, area: Rect, app: &App, styles: &ThemeSty
         return;
     }
     let text_width = content_area.width.saturating_sub(2) as usize;
-    let (visible, cursor_offset) = search_window(&app.filter, app.filter_cursor, text_width);
-    let content = if app.filter.is_empty() {
-        Span::styled(truncate_width("Search", text_width), styles.muted)
+    let window = search_window_details(&app.filter, app.filter_cursor, text_width);
+    let mut spans = vec![
+        Span::styled("▌", styles.accent),
+        Span::styled(" ", styles.panel),
+    ];
+    if app.filter.is_empty() {
+        spans.push(Span::styled(
+            truncate_width("Search", text_width),
+            styles.muted,
+        ));
+    } else if let Some((selection_start, selection_end)) = app.selection_range() {
+        let start = selection_start.clamp(window.start_character, window.end_character)
+            - window.start_character;
+        let end = selection_end.clamp(window.start_character, window.end_character)
+            - window.start_character;
+        let start_byte = byte_index_at_character(&window.visible, start);
+        let end_byte = byte_index_at_character(&window.visible, end);
+        spans.push(Span::styled(
+            window.visible[..start_byte].to_owned(),
+            styles.panel,
+        ));
+        spans.push(Span::styled(
+            window.visible[start_byte..end_byte].to_owned(),
+            styles.selected,
+        ));
+        spans.push(Span::styled(
+            window.visible[end_byte..].to_owned(),
+            styles.panel,
+        ));
     } else {
-        Span::styled(visible, styles.panel)
-    };
+        spans.push(Span::styled(window.visible, styles.panel));
+    }
     frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("▌", styles.accent),
-            Span::styled(" ", styles.panel),
-            content,
-        ]))
-        .style(styles.panel),
+        Paragraph::new(Line::from(spans)).style(styles.panel),
         content_area,
     );
 
     let cursor_x = content_area
         .x
         .saturating_add(2)
-        .saturating_add(u16::try_from(cursor_offset).unwrap_or(u16::MAX))
+        .saturating_add(u16::try_from(window.cursor_offset).unwrap_or(u16::MAX))
         .min(content_area.right().saturating_sub(1));
     frame.set_cursor_position((cursor_x, content_area.y));
 }
 
-fn search_window(value: &str, cursor: usize, width: usize) -> (String, usize) {
+#[derive(Debug, PartialEq, Eq)]
+struct SearchWindow {
+    visible: String,
+    cursor_offset: usize,
+    start_character: usize,
+    end_character: usize,
+}
+
+fn search_window_details(value: &str, cursor: usize, width: usize) -> SearchWindow {
     if width == 0 {
-        return (String::new(), 0);
+        let cursor = cursor.min(value.chars().count());
+        return SearchWindow {
+            visible: String::new(),
+            cursor_offset: 0,
+            start_character: cursor,
+            end_character: cursor,
+        };
     }
 
     let mut boundaries = value
@@ -1091,8 +1220,27 @@ fn search_window(value: &str, cursor: usize, width: usize) -> (String, usize) {
         }
     }
     let cursor_offset = display_width(&value[start_byte..cursor_byte]);
+    let start_character = boundaries
+        .iter()
+        .position(|boundary| *boundary == start_byte)
+        .unwrap_or(cursor);
+    let end_character = boundaries
+        .iter()
+        .position(|boundary| *boundary == end_byte)
+        .unwrap_or(cursor);
 
-    (value[start_byte..end_byte].to_owned(), cursor_offset)
+    SearchWindow {
+        visible: value[start_byte..end_byte].to_owned(),
+        cursor_offset,
+        start_character,
+        end_character,
+    }
+}
+
+#[cfg(test)]
+fn search_window(value: &str, cursor: usize, width: usize) -> (String, usize) {
+    let window = search_window_details(value, cursor, width);
+    (window.visible, window.cursor_offset)
 }
 
 fn render_list(frame: &mut Frame<'_>, area: Rect, app: &mut App, styles: &ThemeStyles) {
@@ -1475,6 +1623,10 @@ mod tests {
 
     fn control(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
+    fn modified(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+        KeyEvent::new(code, modifiers)
     }
 
     fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
@@ -2098,6 +2250,85 @@ mod tests {
     }
 
     #[test]
+    fn shift_movement_extends_and_plain_arrows_collapse_search_selection() {
+        let mut app = App::new(test_palette(vec![test_item("One Two")]), None);
+        app.insert_text("one two");
+
+        app.handle_key(modified(
+            KeyCode::Left,
+            KeyModifiers::SHIFT | KeyModifiers::CONTROL,
+        ));
+        assert_eq!(app.selection_range(), Some((4, 7)));
+        app.handle_key(modified(KeyCode::Left, KeyModifiers::SHIFT));
+        assert_eq!(app.selection_range(), Some((3, 7)));
+
+        app.handle_key(press(KeyCode::Right));
+        assert_eq!(app.filter_cursor, 7);
+        assert_eq!(app.selection_range(), None);
+
+        app.handle_key(modified(KeyCode::Home, KeyModifiers::SHIFT));
+        assert_eq!(app.selection_range(), Some((0, 7)));
+        app.handle_key(press(KeyCode::Char('x')));
+        assert_eq!(app.filter, "x");
+        assert_eq!(app.filter_cursor, 1);
+        assert_eq!(app.selection_range(), None);
+    }
+
+    #[test]
+    fn backward_and_forward_edits_remove_search_selection() {
+        let edit_keys = [
+            press(KeyCode::Backspace),
+            press(KeyCode::Delete),
+            control(KeyCode::Char('w')),
+            control(KeyCode::Char('u')),
+            control(KeyCode::Char('k')),
+        ];
+
+        for edit_key in edit_keys {
+            let mut app = App::new(test_palette(vec![test_item("ABC")]), None);
+            app.insert_text("abc");
+            app.handle_key(press(KeyCode::Left));
+            app.handle_key(modified(KeyCode::Left, KeyModifiers::SHIFT));
+
+            app.handle_key(edit_key);
+
+            assert_eq!(app.filter, "ac");
+            assert_eq!(app.filter_cursor, 1);
+            assert_eq!(app.selection_range(), None);
+        }
+    }
+
+    #[test]
+    fn paste_replaces_utf8_search_selection() {
+        let mut app = App::new(test_palette(vec![test_item("Résumé")]), None);
+        app.insert_text("résumé");
+        app.handle_key(modified(
+            KeyCode::Left,
+            KeyModifiers::SHIFT | KeyModifiers::ALT,
+        ));
+
+        app.insert_text("sum");
+
+        assert_eq!(app.filter, "sum");
+        assert_eq!(app.filter_cursor, 3);
+        assert_eq!(app.selection_range(), None);
+    }
+
+    #[test]
+    fn escape_clears_search_selection_before_exiting() {
+        let mut app = App::new(test_palette(vec![test_item("Run")]), None);
+        app.insert_text("run");
+        app.handle_key(modified(KeyCode::Left, KeyModifiers::SHIFT));
+
+        app.handle_key(press(KeyCode::Esc));
+        assert!(!app.should_quit);
+        assert_eq!(app.selection_range(), None);
+
+        app.handle_key(press(KeyCode::Esc));
+        assert!(app.should_quit);
+    }
+
+    #[test]
     fn no_search_results_clear_selection_and_do_not_activate() {
         let mut app = App::new(test_palette(vec![test_item("Run")]), None);
         app.insert_text("zzzz");
@@ -2217,6 +2448,40 @@ mod tests {
         assert!(!text.contains("Second"));
         assert_eq!(buffer[(5, 2)].symbol(), "f");
         assert_eq!(buffer[(0, 4)].bg, ratatui::style::Color::Rgb(80, 77, 122));
+    }
+
+    #[test]
+    fn rendering_highlights_the_visible_search_selection() {
+        let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+        let mut app = App::new(test_palette(vec![test_item("ABC")]), None);
+        app.insert_text("abc");
+        app.handle_key(modified(KeyCode::Left, KeyModifiers::SHIFT));
+        app.handle_key(modified(KeyCode::Left, KeyModifiers::SHIFT));
+
+        terminal.draw(|frame| render(frame, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        assert_eq!(buffer[(5, 2)].symbol(), "a");
+        assert_eq!(buffer[(5, 2)].bg, app.palette.theme.panel.ratatui());
+        assert_eq!(buffer[(6, 2)].symbol(), "b");
+        assert_eq!(buffer[(6, 2)].bg, app.palette.theme.selected.ratatui());
+        assert_eq!(buffer[(7, 2)].symbol(), "c");
+        assert_eq!(buffer[(7, 2)].bg, app.palette.theme.selected.ratatui());
+    }
+
+    #[test]
+    fn rendering_clips_a_long_search_selection_to_the_visible_window() {
+        let mut terminal = Terminal::new(TestBackend::new(10, 8)).unwrap();
+        let mut app = App::new(test_palette(vec![test_item("ABCDEF")]), None);
+        app.insert_text("abcdef");
+        app.handle_key(modified(KeyCode::Home, KeyModifiers::SHIFT));
+
+        terminal.draw(|frame| render(frame, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        assert_eq!(buffer[(5, 2)].symbol(), "a");
+        assert_eq!(buffer[(5, 2)].bg, app.palette.theme.selected.ratatui());
+        terminal.backend_mut().assert_cursor_position((5, 2));
     }
 
     #[test]
