@@ -949,7 +949,7 @@ Repository contains no runtime or development dependency on Bun.
 Tag:
 
 ```text
-v0.1.0-alpha.1
+v0.4.0-alpha.1
 ```
 
 Installation:
@@ -1447,7 +1447,7 @@ visible after filtering/resizing, and the popup remains usable with zero results
 - [x] Parse plain-text, tab-separated, and JSON command output.
 - [x] Show plugin command failures inside the palette.
 - [x] Remove the TypeScript/Bun implementation and all active Bun documentation.
-- [ ] Complete the alpha acceptance matrix and tag `v0.1.0-alpha.1`. **Next.**
+- [ ] Complete the alpha acceptance matrix and tag `v0.4.0-alpha.1`. **Next.**
 - [ ] Prepare and verify the crates.io package.
 - [ ] Publish the beta and validate the `cargo install` workflow.
 

@@ -1,11 +1,14 @@
-# tmux-palette
+# tmux-ratlette
+
+![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)
+[![CI](https://github.com/num13ru/tmux-ratlette/actions/workflows/rust.yml/badge.svg)](https://github.com/num13ru/tmux-ratlette/actions/workflows/rust.yml)
 
 A native Rust command palette for tmux. It has no runtime package dependencies
 and opens quickly enough to use as a regular tmux binding.
 
 > [!NOTE]
-> The Rust migration is complete, but the first alpha acceptance matrix is still
-> in progress. Build the current checkout with `cargo build --release`; see
+> The Rust migration is complete, but the `0.4.0-alpha.1` acceptance matrix is
+> still in progress. Build the current checkout with `cargo build --release`; see
 > [PLAN.md](PLAN.md) for the remaining platform and terminal checks.
 
 Type a few letters, pick a command, hit enter: split a pane, jump to a window,
