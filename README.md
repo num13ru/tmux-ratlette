@@ -225,6 +225,8 @@ Window", `cs` for "Choose Session", `sh` for "Split Horizontal", etc.
   slow commands.
 - This is currently built from the repo, including when installed via TPM; crates.io
   and prebuilt releases are not available yet.
+- Shift-based text selection in the search field from the legacy implementation
+  has not been ported yet.
 - `{ "shell": "..." }` and `{ "popup": "..." }` actions execute through the user's
   shell by design.
 
@@ -351,8 +353,29 @@ Append items to the `commands` palette without editing source:
 Action types: `{ "tmux": "..." }`, `{ "shell": "..." }`, `{ "popup": "..." }`, `{ "palette": "find-pane" }`.
 
 `{ "popup": "htop" }` opens the given command in a centered tmux popup
-(80% × 80%, closes when the command exits). Handy for log viewers,
-htop, btop, less, fzf-driven tools, etc.
+(80% × 80% by default). When the command exits, the originating palette opens
+again with its category and command-line configuration preserved. Handy for log
+viewers, htop, btop, less, fzf-driven tools, etc.
+
+Popup actions can override the global popup settings for one item:
+
+```json
+{
+  "popup": "lazygit",
+  "width": "70%",
+  "height": "24",
+  "padX": 2,
+  "padY": 1,
+  "border": "rounded"
+}
+```
+
+`width` and `height` accept a positive cell count or percentage. `padX` and
+`padY` are deducted on both sides from that requested size, with a minimum final
+dimension of one cell. `border` accepts the same values as `popupBorder` below.
+Per-item values take precedence over `sizing.json`. Popup actions require the
+`bin/tmux-palette.sh` launcher so the palette can close before the tool opens and
+relaunch afterward; a direct binary invocation reports this instead of exiting.
 
 ### `navigation.json` — list navigation behavior
 
@@ -380,7 +403,11 @@ replacing the search-box edit bindings for those keys. Default: `false`.
   "padX": 3,
   "mobileWidth": 80,
   "border": "none",
-  "popupBorder": "none"
+  "popupBorder": "none",
+  "popupWidth": "80%",
+  "popupHeight": "80%",
+  "popupPadX": 0,
+  "popupPadY": 0
 }
 ```
 
@@ -393,12 +420,15 @@ when the terminal is narrower than this many columns (iOS terminals
 like Blink or Moshi typically run 50-60 cols), the popup goes
 edge-to-edge with `padX=1`. Defaults to 80, set to 0 to disable.
 
+`popupWidth`, `popupHeight`, `popupPadX`, and `popupPadY` provide defaults for
+popup actions. Width and height accept a positive cell count or percentage.
+
 `border` is the main palette border, `popupBorder` is the border for
-`{ "popup": "..." }` action popups. Both default to `none`. Accepted
-values: `none`, `single`, `double`, `heavy`, `rounded`, `padded`,
-`simple` — passed straight to `tmux display-popup -b`. `rounded` works
-but its corner glyphs can leave small visual gaps against the
-surrounding terminal, so it is not the default.
+`{ "popup": "..." }` action popups. Both default to `none`. Accepted values:
+`none`, `single`, `double`, `heavy`, `rounded`, `padded`, `simple` — passed
+straight to `tmux display-popup -b`. `rounded` works but its corner glyphs can
+leave small visual gaps against the surrounding terminal, so it is not the
+default.
 
 ### Themes
 

@@ -6,7 +6,7 @@ use std::path::{Component, Path};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
-use crate::model::{Action, Item, Palette, ThemeColor};
+use crate::model::{Action, Item, Palette, PopupAction, ThemeColor};
 
 const DEFAULT_WIDTH: u16 = 90;
 const DEFAULT_MAX_HEIGHT: u16 = 28;
@@ -511,20 +511,58 @@ fn validate_display_text(index: usize, field: &str, value: &str) -> Result<(), S
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct RawAction {
     tmux: Option<String>,
     shell: Option<String>,
     popup: Option<String>,
     palette: Option<String>,
+    width: Option<String>,
+    height: Option<String>,
+    pad_x: Option<u16>,
+    pad_y: Option<u16>,
+    border: Option<String>,
 }
 
 impl RawAction {
     pub(crate) fn into_action(self, owner: &str) -> Result<Action, String> {
+        let Self {
+            tmux,
+            shell,
+            popup,
+            palette,
+            width,
+            height,
+            pad_x,
+            pad_y,
+            border,
+        } = self;
+        let popup = popup
+            .map(|command| {
+                Ok::<_, String>(PopupAction {
+                    command,
+                    width: width
+                        .as_deref()
+                        .map(|value| validated_size(value, "popup action width"))
+                        .transpose()?,
+                    height: height
+                        .as_deref()
+                        .map(|value| validated_size(value, "popup action height"))
+                        .transpose()?,
+                    pad_x,
+                    pad_y,
+                    border: border
+                        .as_deref()
+                        .map(|value| validated_border(value, "popup action border"))
+                        .transpose()?,
+                })
+            })
+            .transpose()?;
         let actions = [
-            self.tmux.map(Action::Tmux),
-            self.shell.map(Action::Shell),
-            self.popup.map(Action::Popup),
-            self.palette.map(Action::Palette),
+            tmux.map(Action::Tmux),
+            shell.map(Action::Shell),
+            popup.map(Action::Popup),
+            palette.map(Action::Palette),
         ]
         .into_iter()
         .flatten()
@@ -535,10 +573,10 @@ impl RawAction {
             ));
         };
         let empty = match action {
-            Action::Tmux(value)
-            | Action::Shell(value)
-            | Action::Popup(value)
-            | Action::Palette(value) => value.trim().is_empty(),
+            Action::Tmux(value) | Action::Shell(value) | Action::Palette(value) => {
+                value.trim().is_empty()
+            }
+            Action::Popup(action) => action.command.trim().is_empty(),
             Action::ApplyTheme(_) | Action::None => false,
         };
         if empty {
@@ -651,6 +689,71 @@ mod tests {
         assert_eq!(palette.items.len(), 2);
         assert_eq!(palette.warnings.len(), 1);
         assert!(palette.warnings[0].contains("exactly one"));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn popup_actions_load_per_item_sizing_and_border_overrides() {
+        let directory = temp_directory();
+        fs::write(
+            directory.join("commands.json"),
+            r#"[{"title":"Logs","action":{"popup":"tail -f app.log","width":"70%","height":"24","padX":3,"padY":2,"border":"rounded"}}]"#,
+        )
+        .unwrap();
+        let mut palette = base_palette();
+
+        apply(&mut palette, Some(&directory), true);
+
+        let Action::Popup(action) = &palette.items[2].action else {
+            panic!("expected popup action");
+        };
+        assert_eq!(action.command, "tail -f app.log");
+        assert_eq!(action.width.as_deref(), Some("70%"));
+        assert_eq!(action.height.as_deref(), Some("24"));
+        assert_eq!(action.pad_x, Some(3));
+        assert_eq!(action.pad_y, Some(2));
+        assert_eq!(action.border.as_deref(), Some("rounded"));
+        assert!(palette.warnings.is_empty());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn invalid_popup_overrides_reject_the_containing_file() {
+        for action in [
+            r#"{"popup":"htop","width":"wide"}"#,
+            r#"{"popup":"htop","border":"triple"}"#,
+        ] {
+            let directory = temp_directory();
+            fs::write(
+                directory.join("commands.json"),
+                format!(r#"[{{"title":"Broken","action":{action}}}]"#),
+            )
+            .unwrap();
+            let mut palette = base_palette();
+
+            apply(&mut palette, Some(&directory), true);
+
+            assert_eq!(palette.items.len(), 2);
+            assert_eq!(palette.warnings.len(), 1);
+            assert!(palette.warnings[0].contains("commands.json"));
+            fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
+    #[test]
+    fn popup_overrides_on_other_actions_are_ignored_for_schema_tolerance() {
+        let directory = temp_directory();
+        fs::write(
+            directory.join("commands.json"),
+            r#"[{"title":"Shell","action":{"shell":"echo ok","width":"future"}}]"#,
+        )
+        .unwrap();
+        let mut palette = base_palette();
+
+        apply(&mut palette, Some(&directory), true);
+
+        assert!(palette.warnings.is_empty());
+        assert_eq!(palette.items[2].action, Action::Shell("echo ok".to_owned()));
         fs::remove_dir_all(directory).unwrap();
     }
 
