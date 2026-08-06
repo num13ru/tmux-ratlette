@@ -201,9 +201,12 @@ Constraints
 ## Usage
 
 - **Type** to filter. Multi-word search is supported (`split horiz`).
+- **Left/Right**, **Home/End** (or **Ctrl+A/E**), and **Ctrl/Alt+Left/Right**
+  edit the search cursor by character, line, or word. Hold **Shift** with any
+  of them to select text; typing, pasting, Backspace, or Delete replaces it.
 - **Up/Down arrows** or **Ctrl+P / Ctrl+N** to move selection; **PageUp/PageDown** to page. Turn on `vimKeys` in `navigation.json` for **Ctrl+J/K** (down/up) and **Ctrl+U/D** (page), replacing the search-box bindings for those keys.
 - **Enter** to run the selected command.
-- **Esc** to cancel.
+- **Esc** to clear a search selection, go back, or cancel.
 - **Mouse** works too — click rows, scroll the wheel.
 
 **Auto-aliases**: initials of multi-word titles match automatically. Type `nw` for "New
@@ -225,8 +228,6 @@ Window", `cs` for "Choose Session", `sh` for "Split Horizontal", etc.
   slow commands.
 - This is currently built from the repo, including when installed via TPM; crates.io
   and prebuilt releases are not available yet.
-- Shift-based text selection in the search field from the legacy implementation
-  has not been ported yet.
 - `{ "shell": "..." }` and `{ "popup": "..." }` actions execute through the user's
   shell by design.
 
