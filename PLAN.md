@@ -1444,8 +1444,8 @@ visible after filtering/resizing, and the popup remains usable with zero results
 - [x] Tolerate unknown optional fields and report malformed files with paths.
 - [x] Load navigation, sizing, theme, and custom palette configuration.
 - [x] Execute shell-generated palette sources with timeout and output limits.
-- [ ] Parse plain-text, tab-separated, and JSON command output. **Next.**
-- [ ] Show plugin command failures inside the palette.
+- [x] Parse plain-text, tab-separated, and JSON command output.
+- [ ] Show plugin command failures inside the palette. **Next.**
 - [ ] Remove the TypeScript/Bun implementation and all Bun documentation.
 - [ ] Complete the alpha acceptance matrix and tag `v0.1.0-alpha.1`.
 - [ ] Prepare and verify the crates.io package.

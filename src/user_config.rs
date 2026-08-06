@@ -374,6 +374,9 @@ struct RawCustomPalette {
     from: Vec<String>,
     from_category: Option<String>,
     command: Option<String>,
+    action: Option<RawAction>,
+    icon: Option<String>,
+    icon_color: Option<String>,
     grouped: Option<bool>,
     empty_text: Option<String>,
 }
@@ -401,26 +404,35 @@ impl RawCustomPalette {
                     .cloned(),
             );
         }
-        items.extend(
-            self.items
-                .into_iter()
-                .enumerate()
-                .map(|(index, item)| item.into_item(index))
-                .collect::<Result<Vec<_>, _>>()?,
-        );
+        let inline_items = self
+            .items
+            .into_iter()
+            .enumerate()
+            .map(|(index, item)| item.into_item(index))
+            .collect::<Result<Vec<_>, _>>()?;
+        let path = config_dir.join("palettes").join(format!("{name}.json"));
+        let mut source_warning = None;
+        if let Some(command) = self.command.filter(|command| !command.is_empty()) {
+            match crate::plugin_source::run(&command).and_then(|output| {
+                crate::plugin_output::parse(
+                    &output,
+                    self.action,
+                    self.icon.as_deref(),
+                    self.icon_color.as_deref(),
+                )
+            }) {
+                Ok(dynamic_items) => items.extend(dynamic_items),
+                Err(error) => source_warning = Some(warning(&path, error)),
+            }
+        }
+        items.extend(inline_items);
         let mut palette = Palette::new(name, self.title.as_deref().unwrap_or(name), items);
         palette.grouped = self.grouped.unwrap_or(false);
         if let Some(empty_text) = self.empty_text {
             palette.empty_text = empty_text;
         }
-        if let Some(command) = self.command.filter(|command| !command.is_empty()) {
-            match crate::plugin_source::run(&command) {
-                Ok(output) => palette.source_output = Some(output),
-                Err(error) => palette.warnings.push(warning(
-                    &config_dir.join("palettes").join(format!("{name}.json")),
-                    error,
-                )),
-            }
+        if let Some(warning) = source_warning {
+            palette.warnings.push(warning);
         }
         Ok(palette)
     }
@@ -428,7 +440,7 @@ impl RawCustomPalette {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct RawItem {
+pub(crate) struct RawItem {
     icon: Option<String>,
     icon_color: Option<String>,
     title: String,
@@ -437,13 +449,28 @@ struct RawItem {
     category: Option<String>,
     #[serde(default)]
     aliases: Vec<String>,
+    selectable: Option<bool>,
     action: RawAction,
 }
 
 impl RawItem {
-    fn into_item(self, index: usize) -> Result<Item, String> {
+    pub(crate) fn into_item(self, index: usize) -> Result<Item, String> {
         if self.title.trim().is_empty() {
             return Err(format!("item {index} has an empty title"));
+        }
+        validate_display_text(index, "title", &self.title)?;
+        for (field, value) in [
+            ("icon", self.icon.as_deref()),
+            ("description", self.description.as_deref()),
+            ("shortcut", self.shortcut.as_deref()),
+            ("category", self.category.as_deref()),
+        ] {
+            if let Some(value) = value {
+                validate_display_text(index, field, value)?;
+            }
+        }
+        for alias in &self.aliases {
+            validate_display_text(index, "alias", alias)?;
         }
         if let Some(color) = self.icon_color.as_deref()
             && ThemeColor::parse(color).is_none()
@@ -452,19 +479,28 @@ impl RawItem {
                 "item {index} has invalid iconColor {color:?}; expected a hex, ANSI name, or transparent"
             ));
         }
-        let mut item = Item::new(&self.title, self.action.into_action(index)?);
+        let owner = format!("item {index}");
+        let mut item = Item::new(&self.title, self.action.into_action(&owner)?);
         item.icon = self.icon;
         item.icon_color = self.icon_color;
         item.description = self.description;
         item.shortcut = self.shortcut;
         item.category = self.category;
         item.aliases = self.aliases;
+        item.selectable = self.selectable.unwrap_or(true);
         Ok(item)
     }
 }
 
+fn validate_display_text(index: usize, field: &str, value: &str) -> Result<(), String> {
+    if value.chars().any(char::is_control) {
+        return Err(format!("item {index} {field} contains a control character"));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Deserialize)]
-struct RawAction {
+pub(crate) struct RawAction {
     tmux: Option<String>,
     shell: Option<String>,
     popup: Option<String>,
@@ -472,7 +508,7 @@ struct RawAction {
 }
 
 impl RawAction {
-    fn into_action(self, index: usize) -> Result<Action, String> {
+    pub(crate) fn into_action(self, owner: &str) -> Result<Action, String> {
         let actions = [
             self.tmux.map(Action::Tmux),
             self.shell.map(Action::Shell),
@@ -484,7 +520,7 @@ impl RawAction {
         .collect::<Vec<_>>();
         let [action] = actions.as_slice() else {
             return Err(format!(
-                "item {index} action must contain exactly one of tmux, shell, popup, or palette"
+                "{owner} action must contain exactly one of tmux, shell, popup, or palette"
             ));
         };
         let empty = match action {
@@ -495,7 +531,7 @@ impl RawAction {
             Action::ApplyTheme(_) | Action::None => false,
         };
         if empty {
-            return Err(format!("item {index} action cannot be empty"));
+            return Err(format!("{owner} action cannot be empty"));
         }
         Ok(action.clone())
     }
@@ -679,7 +715,7 @@ mod tests {
         fs::write(directory.join("aliases.json"), r#"{"Inline":["in"]}"#).unwrap();
         fs::write(
             directory.join("palettes/favorites.json"),
-            r#"{"title":"Favorites","from":["Hidden","Custom"],"fromCategory":"Tools","items":[{"title":"Inline","action":{"tmux":"display-message inline"}}],"grouped":true,"emptyText":"Nothing here","command":"printf dynamic","future":true}"#,
+            r#"{"title":"Favorites","from":["Hidden","Custom"],"fromCategory":"Tools","command":"printf dynamic","action":{"shell":"echo {}"},"items":[{"title":"Inline","action":{"tmux":"display-message inline"}}],"grouped":true,"emptyText":"Nothing here","future":true}"#,
         )
         .unwrap();
         let base = base_palette();
@@ -696,13 +732,12 @@ mod tests {
                 .iter()
                 .map(|item| item.title.as_str())
                 .collect::<Vec<_>>(),
-            ["Hidden", "Custom", "Custom", "Inline"]
+            ["Hidden", "Custom", "Custom", "dynamic", "Inline"]
         );
-        assert_eq!(palette.items[3].aliases, ["in"]);
-        assert_eq!(
-            palette.source_output.as_deref(),
-            Some(b"dynamic".as_slice())
+        assert!(
+            matches!(palette.items[3].action, Action::Shell(ref command) if command == "echo dynamic")
         );
+        assert_eq!(palette.items[4].aliases, ["in"]);
         assert!(palette.warnings.is_empty());
         fs::remove_dir_all(directory).unwrap();
     }
@@ -739,7 +774,6 @@ mod tests {
 
         assert_eq!(palette.items.len(), 1);
         assert_eq!(palette.items[0].title, "Still here");
-        assert!(palette.source_output.is_none());
         assert_eq!(palette.warnings.len(), 1);
         assert!(palette.warnings[0].contains("palettes/failing.json"));
         assert!(palette.warnings[0].contains("exit 9: failed-source"));
