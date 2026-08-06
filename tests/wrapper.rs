@@ -117,6 +117,11 @@ fn wrapper_launches_configured_native_binary() {
     assert!(invocation.contains("display-popup"));
     assert!(invocation.contains(fake_palette.to_str().unwrap()));
     assert!(invocation.contains("exec"));
+    let command = invocation.lines().last().unwrap();
+    assert!(command.contains("TMUX_PALETTE_WRAPPER="));
+    assert!(command.contains("/bin/tmux-palette.sh"));
+    assert!(command.contains("TMUX_PALETTE_TMUX_BIN="));
+    assert!(command.contains(fake_tmux.to_str().unwrap()));
 }
 
 #[test]

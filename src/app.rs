@@ -152,6 +152,10 @@ impl LayoutOptions {
     }
 }
 
+fn nonempty_environment(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|value| !value.is_empty())
+}
+
 #[derive(Debug)]
 struct App {
     palette: Palette,
@@ -165,6 +169,15 @@ struct App {
     config_dir: Option<PathBuf>,
     navigation: NavigationConfig,
     escape: EscapeBehavior,
+    sizing: SizingConfig,
+    popup_wrapper: Option<String>,
+    tmux_binary: String,
+    initial_palette: String,
+    initial_category: Option<String>,
+    relaunch_no_mouse: bool,
+    relaunch_debug: bool,
+    relaunch_client_width: Option<NonZeroU16>,
+    relaunch_client_height: Option<NonZeroU16>,
     stack: Vec<NavState>,
     should_quit: bool,
 }
@@ -216,7 +229,13 @@ impl App {
         config_dir: Option<PathBuf>,
         runtime: RuntimeConfig,
     ) -> Self {
-        palette.warnings.extend(runtime.warnings);
+        let RuntimeConfig {
+            navigation,
+            sizing,
+            warnings,
+        } = runtime;
+        palette.warnings.extend(warnings);
+        let initial_palette = palette.name.clone();
         let selected = palette
             .initial_selected
             .filter(|index| {
@@ -237,8 +256,18 @@ impl App {
             status,
             dispatch_path,
             config_dir,
-            navigation: runtime.navigation,
-            escape: runtime.sizing.escape,
+            navigation,
+            escape: sizing.escape,
+            sizing,
+            popup_wrapper: nonempty_environment("TMUX_PALETTE_WRAPPER"),
+            tmux_binary: nonempty_environment("TMUX_PALETTE_TMUX_BIN")
+                .unwrap_or_else(|| "tmux".to_owned()),
+            initial_palette,
+            initial_category: None,
+            relaunch_no_mouse: false,
+            relaunch_debug: false,
+            relaunch_client_width: None,
+            relaunch_client_height: None,
             stack: Vec::new(),
             should_quit: false,
         };
@@ -453,8 +482,50 @@ impl App {
                     ));
                 }
             }
-            Action::Popup(_) => {
-                self.status = Some("Popup actions have not been ported to Rust yet".to_owned());
+            Action::Popup(action) => {
+                let Some(path) = self.dispatch_path.as_deref() else {
+                    self.status =
+                        Some("Popup not dispatched: launch through bin/tmux-palette.sh".to_owned());
+                    return;
+                };
+                let Some(wrapper) = self.popup_wrapper.as_deref() else {
+                    self.status = Some(
+                        "Popup not dispatched: palette wrapper path is unavailable".to_owned(),
+                    );
+                    return;
+                };
+                let relaunch_arguments = match self.popup_relaunch_arguments() {
+                    Ok(arguments) => arguments,
+                    Err(error) => {
+                        self.status = Some(format!("Could not queue popup: {error}"));
+                        return;
+                    }
+                };
+                let shell_command = match dispatch::popup_shell_command(
+                    &action,
+                    dispatch::PopupContext {
+                        sizing: &self.sizing,
+                        theme: self.palette.theme,
+                        tmux_binary: &self.tmux_binary,
+                        wrapper,
+                        relaunch_arguments: &relaunch_arguments,
+                    },
+                ) {
+                    Ok(command) => command,
+                    Err(error) => {
+                        self.status = Some(format!("Could not queue popup: {error}"));
+                        return;
+                    }
+                };
+                match dispatch::write_action(&Action::Shell(shell_command), path) {
+                    Ok(true) => self.should_quit = true,
+                    Ok(false) => {
+                        self.status = Some("Could not encode popup action".to_owned());
+                    }
+                    Err(error) => {
+                        self.status = Some(format!("Could not queue popup: {error}"));
+                    }
+                }
             }
             Action::ApplyTheme(slug) => {
                 let Some(config_dir) = self.config_dir.as_deref() else {
@@ -488,6 +559,34 @@ impl App {
                 self.status = Some("This item has no action".to_owned());
             }
         }
+    }
+
+    fn popup_relaunch_arguments(&self) -> std::result::Result<Vec<String>, String> {
+        let mut arguments = vec![self.palette.name.clone()];
+        if self.palette.name == self.initial_palette {
+            if let Some(category) = self.initial_category.as_deref() {
+                arguments.push(format!("--category={category}"));
+            }
+        }
+        if let Some(config_dir) = self.config_dir.as_deref() {
+            let Some(config_dir) = config_dir.to_str() else {
+                return Err("configuration path is not valid UTF-8".to_owned());
+            };
+            arguments.push(format!("--config-dir={config_dir}"));
+        }
+        if self.relaunch_no_mouse {
+            arguments.push("--no-mouse".to_owned());
+        }
+        if self.relaunch_debug {
+            arguments.push("--debug".to_owned());
+        }
+        if let Some(width) = self.relaunch_client_width {
+            arguments.push(format!("--client-width={width}"));
+        }
+        if let Some(height) = self.relaunch_client_height {
+            arguments.push(format!("--client-height={height}"));
+        }
+        Ok(arguments)
     }
 
     fn handle_mouse(&mut self, mouse: MouseEvent, area: Rect) {
@@ -831,6 +930,12 @@ fn run_interactive(
             app
         }
     };
+    app.initial_palette = invocation.palette.clone();
+    app.initial_category = invocation.category.clone();
+    app.relaunch_no_mouse = invocation.no_mouse;
+    app.relaunch_debug = invocation.debug;
+    app.relaunch_client_width = invocation.client_width;
+    app.relaunch_client_height = invocation.client_height;
     let mut terminal = TerminalSession::enter(!invocation.no_mouse)?;
 
     while !app.should_quit {
@@ -1763,6 +1868,62 @@ mod tests {
             "tmux:display-message 'Run'"
         );
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn popup_activation_queues_launch_and_relaunch_then_exits() {
+        let path = temp_file();
+        let item = Item::new("Logs", Action::popup("tail -f app.log"));
+        let mut app = App::new(test_palette(vec![item]), Some(path.clone()));
+        app.popup_wrapper = Some("/tmp/tmux-palette.sh".to_owned());
+        app.tmux_binary = "/opt/tmux".to_owned();
+        app.config_dir = Some(PathBuf::from("/tmp/config's"));
+        app.initial_category = Some("Tools & logs".to_owned());
+        app.relaunch_no_mouse = true;
+        app.relaunch_debug = true;
+        app.relaunch_client_width = NonZeroU16::new(120);
+        app.relaunch_client_height = NonZeroU16::new(40);
+
+        app.activate_selected();
+
+        assert!(app.should_quit);
+        let queued = fs::read_to_string(&path).unwrap();
+        assert!(queued.starts_with("shell:'/opt/tmux' display-popup -E"));
+        assert!(queued.contains("'tail -f app.log'"));
+        assert!(queued.contains("run-shell -b"));
+        assert!(queued.contains("/tmp/tmux-palette.sh"));
+        assert!(queued.contains("'test'"));
+        assert!(queued.contains("category"));
+        assert!(queued.contains("Tools & logs"));
+        assert!(queued.contains("config"));
+        assert!(queued.contains("--no-mouse"));
+        assert!(queued.contains("--debug"));
+        assert!(queued.contains("--client-width=120"));
+        assert!(queued.contains("--client-height=40"));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn popup_relaunch_does_not_apply_the_initial_category_to_a_nested_palette() {
+        let mut app = App::new(test_palette(Vec::new()), None);
+        app.initial_category = Some("Tools".to_owned());
+        app.palette.name = "nested".to_owned();
+
+        assert_eq!(app.popup_relaunch_arguments().unwrap(), ["nested"]);
+    }
+
+    #[test]
+    fn popup_activation_stays_open_when_wrapper_context_is_missing() {
+        let path = temp_file();
+        let item = Item::new("Logs", Action::popup("tail -f app.log"));
+        let mut app = App::new(test_palette(vec![item]), Some(path.clone()));
+        app.popup_wrapper = None;
+
+        app.activate_selected();
+
+        assert!(!app.should_quit);
+        assert!(!path.exists());
+        assert!(app.status.unwrap().contains("wrapper path is unavailable"));
     }
 
     #[test]

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
+WRAPPER="$DIR/bin/tmux-palette.sh"
 TMUX_BIN="${TMUX_BIN:-$(command -v tmux 2>/dev/null || true)}"
 
 tmux_message() {
@@ -143,11 +144,13 @@ BORDERED=0
 
 printf -v CMD_FILE_Q '%q' "$CMD_FILE"
 printf -v BINARY_Q '%q' "$BINARY"
+printf -v WRAPPER_Q '%q' "$WRAPPER"
+printf -v TMUX_BIN_Q '%q' "$TMUX_BIN"
 printf -v PAD_X_Q '%q' "$WANT_PADX"
 printf -v BORDERED_Q '%q' "$BORDERED"
 
 "$TMUX_BIN" display-popup "${BORDER_ARGS[@]}" -w "$W" -h "$H" -E \
-  "TMUX_PALETTE_CMD=$CMD_FILE_Q TMUX_PALETTE_BIN=$BINARY_Q TMUX_PALETTE_PADX=$PAD_X_Q TMUX_PALETTE_BORDERED=$BORDERED_Q exec $BINARY_Q$ARG_STR"
+  "TMUX_PALETTE_CMD=$CMD_FILE_Q TMUX_PALETTE_BIN=$BINARY_Q TMUX_PALETTE_WRAPPER=$WRAPPER_Q TMUX_PALETTE_TMUX_BIN=$TMUX_BIN_Q TMUX_PALETTE_PADX=$PAD_X_Q TMUX_PALETTE_BORDERED=$BORDERED_Q exec $BINARY_Q$ARG_STR"
 
 if [ -s "$CMD_FILE" ]; then
   CMD="$(cat "$CMD_FILE")"

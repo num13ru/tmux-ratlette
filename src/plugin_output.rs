@@ -111,7 +111,11 @@ fn substitute(template: &Action, title: &str) -> Action {
     match template {
         Action::Tmux(command) => Action::Tmux(command.replace("{}", title)),
         Action::Shell(command) => Action::Shell(command.replace("{}", title)),
-        Action::Popup(command) => Action::Popup(command.replace("{}", title)),
+        Action::Popup(action) => {
+            let mut action = action.clone();
+            action.command = action.command.replace("{}", title);
+            Action::Popup(action)
+        }
         Action::Palette(name) => Action::Palette(name.clone()),
         Action::ApplyTheme(slug) => Action::ApplyTheme(slug.clone()),
         Action::None => Action::None,
@@ -203,6 +207,29 @@ mod tests {
         assert!(
             matches!(items[0].action, Action::Shell(ref value) if value == "run alpha then alpha")
         );
+    }
+
+    #[test]
+    fn popup_templates_preserve_overrides_while_replacing_the_command() {
+        let items = parse(
+            b"service-a",
+            Some(action(
+                r#"{"popup":"tail -f {}.log","width":"70%","height":"20","padX":2,"padY":1,"border":"rounded"}"#,
+            )),
+            None,
+            None,
+        )
+        .unwrap();
+
+        let Action::Popup(action) = &items[0].action else {
+            panic!("expected popup action");
+        };
+        assert_eq!(action.command, "tail -f service-a.log");
+        assert_eq!(action.width.as_deref(), Some("70%"));
+        assert_eq!(action.height.as_deref(), Some("20"));
+        assert_eq!(action.pad_x, Some(2));
+        assert_eq!(action.pad_y, Some(1));
+        assert_eq!(action.border.as_deref(), Some("rounded"));
     }
 
     #[test]

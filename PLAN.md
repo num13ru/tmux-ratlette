@@ -1446,8 +1446,11 @@ visible after filtering/resizing, and the popup remains usable with zero results
 - [x] Execute shell-generated palette sources with timeout and output limits.
 - [x] Parse plain-text, tab-separated, and JSON command output.
 - [x] Show plugin command failures inside the palette.
+- [x] Port popup actions with global and per-item sizing overrides, border
+      control, and relaunch of the originating palette.
 - [x] Remove the TypeScript/Bun implementation and all active Bun documentation.
-- [ ] Complete the alpha acceptance matrix and tag `v0.4.0-alpha.1`. **Next.**
+- [ ] Port Shift-based search-field text selection. **Next.**
+- [ ] Complete the alpha acceptance matrix and tag `v0.4.0-alpha.1`.
 - [ ] Prepare and verify the crates.io package.
 - [ ] Publish the beta and validate the `cargo install` workflow.
 
@@ -1458,6 +1461,8 @@ visible after filtering/resizing, and the popup remains usable with zero results
 - [x] Rust unit and wrapper integration tests.
 - [x] Commands popup navigation and tmux dispatch smoke test on macOS with
       tmux 3.7b.
+- [x] Popup-action sizing, padding, close, and originating-palette relaunch test
+      on macOS with tmux 3.7b.
 - [ ] macOS test on the minimum supported tmux 3.4 release.
 - [ ] Linux build and real-tmux smoke test.
 - [ ] Kitty, Ghostty, iTerm2, WezTerm, and Terminal.app checks.
