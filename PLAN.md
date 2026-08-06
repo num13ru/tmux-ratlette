@@ -1452,7 +1452,7 @@ visible after filtering/resizing, and the popup remains usable with zero results
 - [x] Port Shift-based search-field text selection.
 - [x] Complete the alpha acceptance matrix and tag `v0.4.0-alpha.1`.
 - [x] Prepare and verify the crates.io package.
-- [ ] Publish the beta and validate the `cargo install` workflow.
+- [ ] Publish 0.4.0 and validate the cargo install workflow.
 
 ### Alpha acceptance matrix
 

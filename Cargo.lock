@@ -689,7 +689,7 @@ dependencies = [
 
 [[package]]
 name = "tmux-ratlette"
-version = "0.4.0-alpha.1"
+version = "0.4.0"
 dependencies = [
  "clap",
  "crossterm",

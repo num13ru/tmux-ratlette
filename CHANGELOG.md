@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The project follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-06
+
 ### Added
 
 - A lean crates.io package manifest, license file, and CI package verification.
