@@ -7,9 +7,9 @@ A native Rust command palette for tmux. It has no runtime package dependencies
 and opens quickly enough to use as a regular tmux binding.
 
 > [!NOTE]
-> The Rust migration is complete, but the `0.4.0-alpha.1` acceptance matrix is
-> still in progress. Build the current checkout with `cargo build --release`; see
-> [PLAN.md](PLAN.md) for the remaining platform and terminal checks.
+> `0.4.0-alpha.1` is the first contributor-oriented Rust alpha. Build the tagged
+> checkout with `cargo build --release`; crates.io and prebuilt binaries are
+> planned for a later release.
 
 Type a few letters, pick a command, hit enter: split a pane, jump to a window,
 detach a session, open a popup tool, or switch to a custom palette. User config
@@ -25,9 +25,10 @@ https://github.com/user-attachments/assets/5edce838-9199-4123-8262-352bc47e989c
 
 ## Status
 
-The Rust version is preparing for its first alpha. Its core behavior is usable,
-but platform and terminal coverage is still incomplete. Expect installation and
-packaging details to change before beta.
+The first Rust alpha is usable on the validated macOS/tmux path and passes the
+Linux CI build. The wider terminal-emulator, SSH, nested-tmux, and mobile-device
+matrix is still compatibility coverage rather than an alpha release gate. Expect
+installation and packaging details to change before beta.
 
 If you'd like to contribute, the most useful work right now is anything that
 improves the existing base (refactors, perf, polish, docs) or fixes a bug. New

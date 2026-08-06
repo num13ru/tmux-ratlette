@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The project follows
 
 ## [Unreleased]
 
+## [0.4.0-alpha.1] - 2026-08-06
+
 ### Added
 
 - Native Rust application covering the Commands, Find Pane, Move Pane, Themes,
@@ -29,14 +31,20 @@ All notable changes to this project are documented here. The project follows
   deferred tmux dispatch are implemented natively while preserving the existing
   JSON configuration paths and schema.
 
+### Fixed
+
+- Preserve and restore the exact Unix terminal state when the palette exits
+  normally or receives `SIGHUP`, `SIGINT`, `SIGQUIT`, or `SIGTERM`.
+
 ### Removed
 
 - Removed the legacy implementation and its runtime and development toolchain.
 
 ### Known limitations
 
-- The full platform, terminal-emulator, SSH, nested-tmux, and signal-cleanup
-  acceptance matrix is not complete yet.
+- Compatibility coverage outside macOS ARM64 with tmux 3.7b and the Ubuntu CI
+  build is not exhaustive yet, including additional terminal emulators, SSH,
+  nested tmux, and mobile terminals.
 - Installation currently builds the executable from a repository checkout;
   crates.io and prebuilt releases are not available yet.
 
