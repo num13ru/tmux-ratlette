@@ -1,10 +1,4 @@
-# dependencies (bun install)
-node_modules
-
-# output
-out
-dist
-*.tgz
+# Rust build output
 /target/
 
 # code coverage
@@ -24,13 +18,10 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .env.local
 
 # caches
-.eslintcache
 .cache
-*.tsbuildinfo
 
 # IntelliJ based IDEs
 .idea
 
-# Finder (MacOS) folder config
+# Finder (macOS) folder config
 .DS_Store
-dist/

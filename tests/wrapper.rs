@@ -87,7 +87,7 @@ fn popup_argument<'a>(invocation: &'a str, flag: &str) -> Option<&'a str> {
 }
 
 #[test]
-fn wrapper_launches_configured_rust_binary_without_bun() {
+fn wrapper_launches_configured_native_binary() {
     let temp = TempDirectory::new();
     let fake_tmux = temp.path().join("tmux");
     let fake_palette = temp.path().join("tmux-ratlette");
@@ -117,7 +117,6 @@ fn wrapper_launches_configured_rust_binary_without_bun() {
     assert!(invocation.contains("display-popup"));
     assert!(invocation.contains(fake_palette.to_str().unwrap()));
     assert!(invocation.contains("exec"));
-    assert!(!invocation.contains("bun"));
 }
 
 #[test]

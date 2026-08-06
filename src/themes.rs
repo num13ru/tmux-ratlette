@@ -361,7 +361,7 @@ mod tests {
     }
 
     #[test]
-    fn default_matches_the_typescript_shades_of_purple_theme() {
+    fn default_matches_the_legacy_shades_of_purple_theme() {
         let theme = default_theme();
 
         assert_eq!(theme.bg.tmux(), "#1e1d40");
@@ -373,7 +373,7 @@ mod tests {
     }
 
     #[test]
-    fn bundled_themes_match_the_typescript_catalog() {
+    fn bundled_themes_match_the_legacy_catalog() {
         assert_eq!(BUNDLED_THEMES.len(), 13);
         assert_eq!(BUNDLED_THEMES[0].slug, "shades-of-purple");
         assert_eq!(BUNDLED_THEMES[12].slug, "terminal");

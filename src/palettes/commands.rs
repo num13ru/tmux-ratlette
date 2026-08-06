@@ -161,7 +161,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ports_every_typescript_command() {
+    fn preserves_every_legacy_command() {
         let palette = palette();
 
         assert_eq!(palette.items.len(), 31);

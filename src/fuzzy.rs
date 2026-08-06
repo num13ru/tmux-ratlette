@@ -239,7 +239,7 @@ mod tests {
     }
 
     #[test]
-    fn matches_the_shared_typescript_parity_fixtures() {
+    fn matches_the_shared_parity_fixtures() {
         let fixture = include_str!("../tests/fixtures/fuzzy-parity.tsv");
         for line in fixture.lines() {
             if line.trim().is_empty() || line.starts_with('#') {

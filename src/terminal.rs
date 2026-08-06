@@ -22,8 +22,8 @@ impl TerminalSession {
             return Err(Error::NotInteractive);
         }
 
-        // The palette has an explicit theme and its TypeScript predecessor
-        // renders that theme even when NO_COLOR is inherited from a parent.
+        // The palette has an explicit theme, so inherited NO_COLOR must not
+        // suppress the colors selected by the user.
         force_color_output(true);
         enable_raw_mode().map_err(Error::Terminal)?;
 

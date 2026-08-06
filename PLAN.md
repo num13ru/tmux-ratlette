@@ -1383,7 +1383,7 @@ Possibly direct tmux popup management from Rust
 
 ## 27. Rust Port Progress
 
-Last reviewed: 2026-08-05.
+Last reviewed: 2026-08-06.
 
 Check an item only after its automated tests pass. Check phase-level acceptance
 items only after the relevant behavior has also been exercised in a real tmux
@@ -1417,7 +1417,7 @@ theme parity remains in the later dynamic-theme phase.
 
 ### Next: search and rendering parity
 
-- [x] Port the TypeScript fuzzy matcher with shared parity fixtures.
+- [x] Port the legacy fuzzy matcher with shared parity fixtures.
 - [x] Add filter text, cursor position, and selection state to the Rust app.
 - [x] Handle character insertion, Backspace, Delete, Left/Right, and word-wise
       cursor movement without corrupting UTF-8 input.
@@ -1428,9 +1428,9 @@ theme parity remains in the later dynamic-theme phase.
 - [x] Add terminal-cell-aware Unicode truncation and padding.
 - [x] Add mouse click and wheel behavior, including off-screen rows.
 - [x] Complete narrow-terminal and bordered-popup layout parity.
-- [x] Compare Rust and TypeScript screenshots at representative popup sizes.
+- [x] Compare pre-migration and Rust screenshots at representative popup sizes.
 
-Search works when the same query produces the same ordered items as TypeScript,
+Search preserves the pre-migration query ordering captured by the parity fixtures,
 editing remains correct for Unicode text and boundary keys, selection stays
 visible after filtering/resizing, and the popup remains usable with zero results.
 
@@ -1446,8 +1446,8 @@ visible after filtering/resizing, and the popup remains usable with zero results
 - [x] Execute shell-generated palette sources with timeout and output limits.
 - [x] Parse plain-text, tab-separated, and JSON command output.
 - [x] Show plugin command failures inside the palette.
-- [ ] Remove the TypeScript/Bun implementation and all Bun documentation. **Next.**
-- [ ] Complete the alpha acceptance matrix and tag `v0.1.0-alpha.1`.
+- [x] Remove the TypeScript/Bun implementation and all active Bun documentation.
+- [ ] Complete the alpha acceptance matrix and tag `v0.1.0-alpha.1`. **Next.**
 - [ ] Prepare and verify the crates.io package.
 - [ ] Publish the beta and validate the `cargo install` workflow.
 
@@ -1463,4 +1463,4 @@ visible after filtering/resizing, and the popup remains usable with zero results
 - [ ] Kitty, Ghostty, iTerm2, WezTerm, and Terminal.app checks.
 - [ ] SSH, nested tmux, and narrow mobile terminal checks.
 - [ ] Terminal cleanup checks for signals and forced subprocess failures.
-- [ ] Startup-time measurement against the Bun implementation.
+- [ ] Record a native startup-time baseline.
