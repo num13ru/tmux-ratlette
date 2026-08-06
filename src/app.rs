@@ -343,13 +343,13 @@ impl App {
 
         for index in self.visible_indices() {
             let item = &self.palette.items[index];
-            if self.palette.grouped
-                && self.filter.trim().is_empty()
-                && let Some(category) = item.category.as_deref()
-                && last_category != Some(category)
-            {
-                rows.push(Row::Category(category.to_owned()));
-                last_category = Some(category);
+            if self.palette.grouped && self.filter.trim().is_empty() {
+                if let Some(category) = item.category.as_deref() {
+                    if last_category != Some(category) {
+                        rows.push(Row::Category(category.to_owned()));
+                        last_category = Some(category);
+                    }
+                }
             }
             rows.push(Row::Item(index));
         }
@@ -399,15 +399,16 @@ impl App {
             return;
         }
 
-        if let Some(selected) = self.selected
-            && let Some(selected_row) = rows
+        if let Some(selected) = self.selected {
+            if let Some(selected_row) = rows
                 .iter()
                 .position(|row| matches!(row, Row::Item(index) if *index == selected))
-        {
-            if selected_row < self.scroll {
-                self.scroll = selected_row;
-            } else if selected_row >= self.scroll.saturating_add(list_height) {
-                self.scroll = selected_row + 1 - list_height;
+            {
+                if selected_row < self.scroll {
+                    self.scroll = selected_row;
+                } else if selected_row >= self.scroll.saturating_add(list_height) {
+                    self.scroll = selected_row + 1 - list_height;
+                }
             }
         }
 
@@ -767,14 +768,13 @@ fn measure_palette(
             .unwrap_or_else(|| theme.tmux_border_style()),
     };
 
-    if let Some(width) = client_width.map(NonZeroU16::get)
-        && sizing.mobile_width > 0
-        && width < sizing.mobile_width
-    {
-        measurement.width = width;
-        measurement.pad_x = 1;
-        if let Some(height) = client_height.map(NonZeroU16::get) {
-            measurement.rows = measurement.rows.max(height);
+    if let Some(width) = client_width.map(NonZeroU16::get) {
+        if sizing.mobile_width > 0 && width < sizing.mobile_width {
+            measurement.width = width;
+            measurement.pad_x = 1;
+            if let Some(height) = client_height.map(NonZeroU16::get) {
+                measurement.rows = measurement.rows.max(height);
+            }
         }
     }
 

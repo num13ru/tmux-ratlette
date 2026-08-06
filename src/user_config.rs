@@ -104,10 +104,10 @@ pub fn apply(palette: &mut Palette, config_dir: Option<&Path>, is_commands: bool
             .retain(|item| !config.hidden.contains(&item.title));
     }
     for item in &mut palette.items {
-        if item.shortcut.is_none()
-            && let Some(shortcut) = config.shortcuts.get(&item.title)
-        {
-            item.shortcut = Some(shortcut.clone());
+        if item.shortcut.is_none() {
+            if let Some(shortcut) = config.shortcuts.get(&item.title) {
+                item.shortcut = Some(shortcut.clone());
+            }
         }
         if let Some(aliases) = config.aliases.get(&item.title) {
             item.aliases.extend(aliases.iter().cloned());
@@ -483,12 +483,12 @@ impl RawItem {
         for alias in &self.aliases {
             validate_display_text(index, "alias", alias)?;
         }
-        if let Some(color) = self.icon_color.as_deref()
-            && ThemeColor::parse(color).is_none()
-        {
-            return Err(format!(
-                "item {index} has invalid iconColor {color:?}; expected a hex, ANSI name, or transparent"
-            ));
+        if let Some(color) = self.icon_color.as_deref() {
+            if ThemeColor::parse(color).is_none() {
+                return Err(format!(
+                    "item {index} has invalid iconColor {color:?}; expected a hex, ANSI name, or transparent"
+                ));
+            }
         }
         let owner = format!("item {index}");
         let mut item = Item::new(&self.title, self.action.into_action(&owner)?);

@@ -79,7 +79,12 @@ output becomes a disabled error row, and static items remain available.
 
 ## Build and verification
 
-The minimum supported compiler is Rust 1.85. A local verification run is:
+The minimum supported compiler is Rust 1.85. `rust-toolchain.toml` pins local
+and CI commands to Rust 1.85.0 and installs the required `rustfmt` and `clippy`
+components. Keep its channel synchronized with the `rust-version` compatibility
+floor in `Cargo.toml` when raising the MSRV.
+
+A local verification run is:
 
 ```bash
 cargo fmt --check
